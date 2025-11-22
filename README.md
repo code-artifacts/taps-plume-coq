@@ -39,6 +39,12 @@ make all
   - Theorem 5: Completeness for safety (admitted with detailed explanation)
   - Additional corollaries and meta-theorems
 
+- `TAPsExamples.v` - Practical examples (235 lines)
+  - Smart home TAPs with concrete proofs
+  - Safety property verification examples
+  - Conflict analysis demonstrations
+  - Reachability reasoning examples
+
 - `FORMALIZATION.md` - Detailed documentation (272 lines)
   - Complete description of all definitions
   - Theorem statements and significance
