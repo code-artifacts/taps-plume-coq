@@ -1,0 +1,15 @@
+# Makefile for TAPs Coq formalization
+
+.DEFAULT_GOAL := all
+
+all: Makefile.coq
+	$(MAKE) -f Makefile.coq all
+
+clean: Makefile.coq
+	$(MAKE) -f Makefile.coq cleanall
+	rm -f Makefile.coq Makefile.coq.conf
+
+Makefile.coq: _CoqProject
+	coq_makefile -f _CoqProject -o Makefile.coq
+
+.PHONY: all clean
