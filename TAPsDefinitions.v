@@ -72,9 +72,6 @@ Definition Trace := list State.
 (** Initial state *)
 Parameter init_state : State.
 
-(** Event semantics: how an event changes the state *)
-Parameter event_semantics : Event -> State -> State.
-
 (** Execute a single event on a state *)
 Definition exec_event (e : Event) (s : State) (prog : TAPProgram) : State :=
   fold_left (fun s' tap =>

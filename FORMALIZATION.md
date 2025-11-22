@@ -212,12 +212,13 @@ Theorem completeness_safety : forall (prog : TAPProgram) (prop : SafetyProperty)
 
 Some proofs are admitted and marked with detailed comments about required assumptions:
 
-1. **completeness_safety**: Requires bidirectional analysis assumptions
-2. **invariant_preservation_theorem**: Requires induction on event sequences
-3. **conflict_free_deterministic**: Trivially true but formally redundant
-4. **non_conflict_implies_commute**: Requires additional assumptions about action semantics
+1. **completeness_safety (Theorem 5)**: The theorem as stated requires soundness, not completeness. The proof logic needs either (a) both soundness and completeness assumptions, or (b) the theorem should be restated to use soundness. See Theorem 4 (soundness_safety) for the correct formulation.
+2. **invariant_preservation_theorem**: Requires induction on event sequences to show that invariants are maintained across trace generation.
+3. **conflict_free_commutative**: Requires showing that conflict-free TAPs commute when their conditions hold simultaneously.
+4. **conflict_free_safe_analysis**: Requires detailed induction proof using invariant preservation.
+5. **non_conflict_implies_commute**: Requires additional assumptions about action semantics beyond the conflict definition.
 
-These can be completed with more detailed analysis-specific assumptions.
+These proofs can be completed with more detailed analysis-specific assumptions or refined theorem statements.
 
 ## Usage Examples
 

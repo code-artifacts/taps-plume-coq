@@ -92,7 +92,11 @@ Qed.
     then the program is actually safe.
     
     This shows that complete analysis is sufficient for proving absence of
-    safety violations. *)
+    safety violations. 
+    
+    Note: The proof logic requires soundness, not completeness. This theorem
+    would need to be restated or require additional bidirectional assumptions
+    about the analysis to be provable as stated. *)
 Theorem completeness_safety : forall (prog : TAPProgram) (prop : SafetyProperty),
   program_well_formed prog ->
   initially_safe prop ->
@@ -101,16 +105,16 @@ Theorem completeness_safety : forall (prog : TAPProgram) (prop : SafetyProperty)
   forall s : State, reachable prog s -> state_safe s prop.
 Proof.
   intros prog prop H_wf H_init H_complete H_analyze_safe s H_reach.
-  apply H_analyze_safe.
-  unfold analysis_complete in H_complete.
-  (* Since analysis is complete, if s is reachable, then analyze prog s *)
-  unfold reachable in H_reach.
-  destruct H_reach as [events H_in_trace].
-  (* We need to show analyze prog s *)
-  (* For completeness, we need the opposite direction *)
-  (* Let's revise: completeness means analyze -> reachable *)
-  (* So we need to assume something stronger or different *)
-Admitted. (* This requires additional assumptions about the analysis *)
+  (* The proof requires analysis_sound, not analysis_complete.
+     Completeness gives us: analyze prog s -> reachable prog s
+     But we need: reachable prog s -> analyze prog s (which is soundness)
+     
+     To fix this theorem, either:
+     1. Assume both soundness and completeness, or
+     2. Change the theorem to use soundness instead
+     
+     See soundness_safety (Theorem 4) for the correct formulation using soundness. *)
+Admitted.
 
 (** ** Additional Theorems and Lemmas *)
 
@@ -153,16 +157,30 @@ Proof.
   (* This requires a more detailed analysis of gen_trace *)
 Admitted. (* Requires induction on event sequence *)
 
-(** Conflict-free programs have deterministic behavior *)
-Lemma conflict_free_deterministic : forall (prog : TAPProgram),
+(** Conflict-free programs have commutative TAPs *)
+Lemma conflict_free_commutative : forall (prog : TAPProgram) (tap1 tap2 : TAP),
   program_well_formed prog ->
   conflict_free prog ->
-  forall events s,
-    gen_trace events s prog = gen_trace events s prog.
+  In tap1 prog -> In tap2 prog ->
+  tap1 <> tap2 ->
+  trigger tap1 = trigger tap2 ->
+  (forall s, condition tap1 s /\ condition tap2 s -> 
+    tap_apply tap1 (tap_apply tap2 s) = tap_apply tap2 (tap_apply tap1 s)).
 Proof.
-  intros prog H_wf H_cf events s.
-  reflexivity.
-Qed.
+  intros prog tap1 tap2 H_wf H_cf H_in1 H_in2 H_neq H_same_trigger s [H_c1 H_c2].
+  (* By conflict_free assumption *)
+  unfold conflict_free in H_cf.
+  assert (H_no_conflict: ~taps_conflict tap1 tap2).
+  { apply H_cf; assumption. }
+  unfold taps_conflict in H_no_conflict.
+  (* We know they don't conflict, which means either:
+     - same trigger but conditions never both true (contradicts H_c1, H_c2), or
+     - they commute when both conditions hold *)
+  exfalso. apply H_no_conflict.
+  split. assumption.
+  exists s. split. assumption. split. assumption.
+  (* We cannot prove non-equality without additional assumptions *)
+Admitted.
 
 (** If two TAPs commute, their order doesn't matter *)
 Lemma commuting_taps_same_result : forall (tap1 tap2 : TAP) (s : State),
