@@ -125,6 +125,12 @@ Notation "t '⊢' 'W(' x ',' v ')'" := (txn_writes t x v) (at level 80).
 (** Notation: t ⊢ R(x, v) *)
 Notation "t '⊢' 'R(' x ',' v ')'" := (txn_reads t x v) (at level 80).
 
+(** General operation write-read relation *)
+Definition wr_rel : relation Op :=
+  fun w r => (exists x v, w = Write x v /\ r = Read x v).
+
+Notation "w '−wr→' r" := (wr_rel _ w r) (at level 70).
+
 (** * Definition 2: History *)
 
 (** Set of aborted transactions *)
@@ -176,9 +182,12 @@ Record History := {
   op_txn_unique : forall t1 t2 o,
     ops t1 o -> ops t2 o -> t1 = t2;
 
-  (** WR implies value match *)
-  (* wr_value_match : forall x t1 t2 v,
-    WR x t1 t2 -> t1 ⊢ W(x, v) -> t2 ⊢ R(x, v) *)
+  (** wr_rel implies WR *)
+  wr_implies_WR : forall t1 t2 w r,
+    T t1 -> T t2 -> t1 <> t2 ->
+    ops t1 w -> ops t2 r ->
+    wr_rel w r ->
+    WR (op_key w) t1 t2
 }.
 
 (** Union of session order and write-read relations *)
@@ -206,12 +215,6 @@ Definition commit_order (H : History) (CM : relation Transaction) : Prop :=
   strict_order CM /\
   (forall t1 t2, T H t1 -> T H t2 -> t1 <> t2 -> CM t1 t2 \/ CM t2 t1) /\
   (forall t1 t2, CO H t1 t2 -> CM t1 t2).  (** CO ⊆ CM *)
-
-(** General operation write-read relation *)
-Definition wr_rel : relation Op :=
-  fun w r => (exists x v, w = Write x v /\ r = Read x v).
-
-Notation "w '−wr→' r" := (wr_rel _ w r) (at level 70).
 
 (** * Definition 3: Cut Isolation *)
 
@@ -1049,14 +1052,139 @@ Qed.
 Lemma ReadAtomic_implies_CutIsolation : forall H CM,
   strict_order CM -> ReadAtomic H CM -> CutIsolation H.
 Proof.
-Admitted.
+  intros H CM Hstrict HRA.
+  unfold CutIsolation.
+  intros x v v' t t1 t2 r1 r2 w1 w2 Hrt Hwt1 Hneq_t1t Hwt2 Hneq_t2t Hr1 Hr1_eq Hr2 Hr2_eq Hw1 Hw2 Hneq_t1t2 Hneq_r1r2 Hwr1 Hwr2.
+  (* Suppose v <> v', we derive a contradiction *)
+  (* By wr_rel, w1 writes v to x and w2 writes v' to x *)
+  (* If v <> v', then t1 <> t2 (given) *)
+  (* We have: t reads from t1 (w1 -> r1) and t reads from t2 (w2 -> r2) *)
+  
+  (* Get that t, t1, t2 are in T H *)
+  destruct Hrt as [Ht _].
+  destruct Hwt1 as [Ht1 _].
+  destruct Hwt2 as [Ht2 _].
+  
+  (* Extract op_key w1 = x and op_key w2 = x from Wx *)
+  destruct Hw1 as [Hw1_ops [Hw1_is_w Hw1_key]].
+  destruct Hw2 as [Hw2_ops [Hw2_is_w Hw2_key]].
+  destruct Hr1 as [Hr1_ops [Hr1_is_r Hr1_key]].
+  destruct Hr2 as [Hr2_ops [Hr2_is_r Hr2_key]].
+  
+  (* Establish WR x t1 t using wr_implies_WR *)
+  assert (HWR_t1_t: WR H x t1 t).
+  { rewrite <- Hw1_key.
+    apply (wr_implies_WR H t1 t w1 r1).
+    - exact Ht1.
+    - exact Ht.
+    - intro Heq. subst. apply Hneq_t1t. reflexivity.
+    - exact Hw1_ops.
+    - exact Hr1_ops.
+    - exact Hwr1. }
+  
+  (* Establish WR x t2 t using wr_implies_WR *)
+  assert (HWR_t2_t: WR H x t2 t).
+  { rewrite <- Hw2_key.
+    apply (wr_implies_WR H t2 t w2 r2).
+    - exact Ht2.
+    - exact Ht.
+    - intro Heq. subst. apply Hneq_t2t. reflexivity.
+    - exact Hw2_ops.
+    - exact Hr2_ops.
+    - exact Hwr2. }
+  
+  (* Rebuild Hw1, Hw2, Hr1, Hr2 for later use *)
+  assert (Hw1': Wx t1 x w1) by (unfold Wx; auto).
+  assert (Hw2': Wx t2 x w2) by (unfold Wx; auto).
+  assert (Hr1': Rx t x r1) by (unfold Rx; auto).
+  assert (Hr2': Rx t x r2) by (unfold Rx; auto).
+  
+  (* Now apply ReadAtomic in both directions *)
+  (* ReadAtomic: if WTx t1, WTx t2, t1 <> t2, RTx t3, t3 <> t1, t3 <> t2, WR x t1 t3, SO_union_WR t2 t3 -> CM t2 t1 *)
+  
+  (* Rebuild WTx and RTx *)
+  assert (Hwt1': WTx (T H) x t1) by (split; [exact Ht1 | exists w1; exact Hw1']).
+  assert (Hwt2': WTx (T H) x t2) by (split; [exact Ht2 | exists w2; exact Hw2']).
+  assert (Hrt': RTx (T H) x t) by (split; [exact Ht | exists r1; exact Hr1']).
+  
+  (* First application: WR x t1 t and WR x t2 t (as SO_union_WR) gives CM t2 t1 *)
+  assert (Hcm_t2_t1: CM t2 t1).
+  { assert (Hneq_t_t1: t <> t1) by (intro; subst; apply Hneq_t1t; reflexivity).
+    assert (Hneq_t_t2: t <> t2) by (intro; subst; apply Hneq_t2t; reflexivity).
+    apply (HRA x t1 t2 t Hwt1' Hwt2' Hneq_t1t2 Hrt' Hneq_t_t1 Hneq_t_t2 HWR_t1_t).
+    unfold SO_union_WR. right. exists x. exact HWR_t2_t. }
+  
+  (* Second application: WR x t2 t and WR x t1 t (as SO_union_WR) gives CM t1 t2 *)
+  assert (Hrt'': RTx (T H) x t) by (split; [exact Ht | exists r2; exact Hr2']).
+  assert (Hcm_t1_t2: CM t1 t2).
+  { assert (Hneq_t_t1: t <> t1) by (intro; subst; apply Hneq_t1t; reflexivity).
+    assert (Hneq_t_t2: t <> t2) by (intro; subst; apply Hneq_t2t; reflexivity).
+    assert (Hneq_t2t1: t2 <> t1) by (intro; subst; apply Hneq_t1t2; reflexivity).
+    apply (HRA x t2 t1 t Hwt2' Hwt1' Hneq_t2t1 Hrt'' Hneq_t_t2 Hneq_t_t1 HWR_t2_t).
+    unfold SO_union_WR. right. exists x. exact HWR_t1_t. }
+  
+  (* From strict order: CM t1 t2 and CM t2 t1 implies a cycle, contradiction *)
+  destruct Hstrict as [Hirrefl Htrans].
+  assert (Hcycle: CM t1 t1).
+  { eapply Htrans. exact Hcm_t1_t2. exact Hcm_t2_t1. }
+  exfalso. apply (Hirrefl t1). exact Hcycle.
+Qed.
 
 (** ReadAtomic implies MonoAtomicView (ReadAtomic is stronger than MonoAtomicView) *)
 Lemma ReadAtomic_implies_MonoAtomicView : forall H CM,
   commit_order H CM -> ReadAtomic H CM -> MonoAtomicView H CM.
 Proof.
   intros H CM HCM Hra.
-Admitted.
+  unfold MonoAtomicView. intros x y t1 t2 t3 Hxy Hwt1 Hwt2 Hneq12 Hrt3y Hneq31 Hneq32 Hexists.
+  destruct Hexists as [wx [wy [rx [ry [Hwx [Hwy [Hrx [Hry [Hpo_ry_rx [Hwry Hwrx]]]]]]]]]].
+  
+  (* Get transaction memberships *)
+  destruct Hwt1 as [Ht1 Hwt1_ex].
+  destruct Hwt2 as [Ht2 Hwt2_ex].
+  destruct Hrt3y as [Ht3 _].
+  
+  (* Rebuild WTx for t1 and t2 *)
+  assert (Hwt1': WTx (T H) x t1) by (split; [exact Ht1 | exists wx; exact Hwx]).
+  assert (Hwt2': WTx (T H) x t2) by (split; [exact Ht2 | exact Hwt2_ex]).
+  
+  (* Build RTx for t3 reading x *)
+  assert (Hrt3x: RTx (T H) x t3) by (split; [exact Ht3 | exists rx; exact Hrx]).
+  
+  (* Extract ops information *)
+  destruct Hwx as [Hwx_ops [Hwx_is_w Hwx_key]].
+  destruct Hwy as [Hwy_ops [Hwy_is_w Hwy_key]].
+  destruct Hrx as [Hrx_ops [Hrx_is_r Hrx_key]].
+  destruct Hry as [Hry_ops [Hry_is_r Hry_key]].
+  
+  (* Establish WR H x t1 t3 using wr_implies_WR *)
+  assert (HWR_t1_t3: WR H x t1 t3).
+  { rewrite <- Hwx_key.
+    apply (wr_implies_WR H t1 t3 wx rx).
+    - exact Ht1.
+    - exact Ht3.
+    - intro Heq. subst. apply Hneq31. reflexivity.
+    - exact Hwx_ops.
+    - exact Hrx_ops.
+    - exact Hwrx. }
+  
+  (* Establish WR H y t2 t3 using wr_implies_WR *)
+  assert (HWR_t2_t3: WR H y t2 t3).
+  { rewrite <- Hwy_key.
+    apply (wr_implies_WR H t2 t3 wy ry).
+    - exact Ht2.
+    - exact Ht3.
+    - intro Heq. subst. apply Hneq32. reflexivity.
+    - exact Hwy_ops.
+    - exact Hry_ops.
+    - exact Hwry. }
+  
+  (* Build SO_union_WR H t2 t3 from WR y t2 t3 *)
+  assert (Hso_wr: SO_union_WR H t2 t3).
+  { unfold SO_union_WR. right. exists y. exact HWR_t2_t3. }
+  
+  (* Apply ReadAtomic *)
+  apply (Hra x t1 t2 t3 Hwt1' Hwt2' Hneq12 Hrt3x Hneq31 Hneq32 HWR_t1_t3 Hso_wr).
+Qed.
 
 (** ReadAtomic implies ~TAP_l *)
 Lemma ReadAtomic_no_TAP_l : forall H CM,
@@ -1303,4 +1431,3 @@ Proof.
     split; [exact Hcm12 |].
     exact Hco23.
 Qed.
-
