@@ -826,9 +826,7 @@ Proof.
           (* WTx (T H) x t' *)
           unfold WTx. split; [exact Ht' | exists (Write x vr); exact Hwx_t'].
         }
-        split. { exact Hrx'. }
-        split. { exact Hwx_pre. }
-        split. { exact Hwx_t'. }
+        repeat (split; [assumption |]).
         split. { unfold wr_rel. exists x, vr. split; reflexivity. }
         { exact Hpo_pre. }
     }
@@ -882,29 +880,12 @@ Qed.
 Lemma TAP_h_implies_TAP_i : forall H CM,
   commit_order H CM -> TAP_h H -> TAP_i H CM.
 Proof.
-  intros H CM HCM Htap_h.
-  unfold TAP_h in Htap_h.
-  destruct Htap_h as [x [y [t1 [t2 [t3 [wx [wy [rx [ry [Hneq_xy [Hwt1 [Hwt2 [Hneq12 [Hrt3x [Hrt3y [Hneq31 [Hneq32 [Hwx [Hwy [Hrx [Hry [Hwrx [Hwry [Hpo_ry_rx HCO]]]]]]]]]]]]]]]]]]]]]]]].
-  unfold TAP_i.
+  intros H CM [_ [_ Hco_cm]] Htap_h.
+  destruct Htap_h as [x [y [t1 [t2 [t3 [wx [wy [rx [ry H_tap]]]]]]]]].
   exists x, y, t1, t2, t3, wx, wy, rx, ry.
-  (* CO ⊆ CM from commit_order *)
-  destruct HCM as [_ [_ Hco_cm]].
-  split; [exact Hneq_xy |].
-  split; [exact Hwt1 |].
-  split; [exact Hwt2 |].
-  split; [exact Hneq12 |].
-  split; [exact Hrt3x |].
-  split; [exact Hrt3y |].
-  split; [exact Hneq31 |].
-  split; [exact Hneq32 |].
-  split; [exact Hwx |].
-  split; [exact Hwy |].
-  split; [exact Hrx |].
-  split; [exact Hry |].
-  split; [exact Hwrx |].
-  split; [exact Hwry |].
-  split; [exact Hpo_ry_rx |].
-  apply Hco_cm. exact HCO.
+  destruct H_tap as [? [? [? [? [? [? [? [? [? [? [? [? [? [? [? HCO]]]]]]]]]]]]]]].
+  repeat (split; [assumption |]).
+  apply Hco_cm; exact HCO.
 Qed.
 
 (** MonoAtomicView implies ~TAP_i *)
@@ -918,12 +899,7 @@ Proof.
   assert (Hcm21: CM t2 t1).
   { apply (HMono x y t1 t2 t3 Hneq Hwt1 Hwt2 Hneq12 Hrt3y Hneq31 Hneq32).
     exists wx, wy, rx, ry.
-    split; [exact Hwx |].
-    split; [exact Hwy |].
-    split; [exact Hrx |].
-    split; [exact Hry |].
-    split; [exact Hpo |].
-    split; [exact Hwry |].
+    repeat (split; [assumption |]).
     exact Hwrx. }
   unfold strict_order in Hstrict. destruct Hstrict as [Hirrefl Htrans].
   assert (Hcycle: CM t1 t1). { eapply Htrans; [exact HCM_tap | exact Hcm21]. }
@@ -985,21 +961,9 @@ Proof.
     (* This non-monotonic read order is exactly TAP_i, contradicting ~TAP_i *)
     exfalso. apply Hno_i.
     unfold TAP_i. exists x, y, t1, t2, t3, wx, wy, rx, ry.
-    split. { exact Hxy. }        (* x <> y *)
-    split. { exact Hwt1. }       (* WTx t1 x *)
-    split. { exact Hwt2. }       (* WTx t2 x - t2 also writes to x *)
-    split. { exact Hneq12. }     (* t1 <> t2 *)
+    repeat (split; [assumption |]).
     split. { unfold RTx. destruct Hrt3y as [Ht3 _]. split; [exact Ht3 | exists rx; exact Hrx]. }  (* RTx t3 x *)
-    split. { exact Hrt3y. }      (* RTx t3 y *)
-    split. { exact Hneq31. }     (* t3 <> t1 *)
-    split. { exact Hneq32. }     (* t3 <> t2 *)
-    split. { exact Hwx. }        (* Wx t1 x wx *)
-    split. { exact Hwy. }        (* Wx t2 y wy *)
-    split. { exact Hrx. }        (* Rx t3 x rx *)
-    split. { exact Hry. }        (* Rx t3 y ry *)
-    split. { exact Hwrx. }       (* wr_rel wx rx - t3 reads x from t1 *)
-    split. { exact Hwry. }       (* wr_rel wy ry - t3 reads y from t2 *)
-    split. { exact Hpo_ry_rx. }  (* po t3 ry rx - read y before read x *)
+    repeat (split; [assumption |]).
     { exact Hcm12. }             (* CM t1 t2 - the problematic order *)
   + (* Case: CM t2 t1 - t2 commits before t1, which is the goal *)
     assumption.
@@ -1020,12 +984,7 @@ Proof.
     exists x, t1, t2, t3.
     (* CO ⊆ CM from commit_order *)
     destruct HCM as [_ [_ Hco_cm]].
-    split; [exact Hwt1 |].
-    split; [exact Hwt2 |].
-    split; [exact Hneq12 |].
-    split; [exact Hrt3x |].
-    split; [exact Hneq31 |].
-    split; [exact Hneq32 |].
+    repeat (split; [assumption |]).
     left.
     split; [exact Hwr13 |].
     split; [apply Hco_cm; exact Hco12 |].
@@ -1035,12 +994,7 @@ Proof.
     exists x, t1, t2, t3.
     (* CO ⊆ CM from commit_order *)
     destruct HCM as [_ [_ Hco_cm]].
-    split; [exact Hwt1 |].
-    split; [exact Hwt2 |].
-    split; [exact Hneq12 |].
-    split; [exact Hrt3x |].
-    split; [exact Hneq31 |].
-    split; [exact Hneq32 |].
+    repeat (split; [assumption |]).
     right. exists y.
     split; [exact Hrt3y |].
     split; [exact Hwr13 |].
@@ -1272,12 +1226,7 @@ Proof.
     exfalso. apply Hno_l.
     unfold TAP_l.
     exists x, t1, t2, t3.
-    split; [exact Hwt1 |].
-    split; [exact Hwt2 |].
-    split; [exact Hneq12 |].
-    split; [exact Hrt3 |].
-    split; [exact Hneq31 |].
-    split; [exact Hneq32 |].
+    repeat (split; [assumption |]).
     (* Need to show the disjunction for TAP_l *)
     unfold SO_union_WR in Hso_wr.
     destruct Hso_wr as [Hso23 | [y Hwr23]].
@@ -1323,13 +1272,7 @@ Proof.
   exists x, t1, t2, t3.
   (* CO ⊆ CM from commit_order *)
   destruct HCM as [_ [_ Hco_cm]].
-  split; [exact Hwt1 |].
-  split; [exact Hwt2 |].
-  split; [exact Hneq12 |].
-  split; [exact Hrt3 |].
-  split; [exact Hneq31 |].
-  split; [exact Hneq32 |].
-  split; [exact Hwr13 |].
+  repeat (split; [assumption |]).
   split; [apply Hco_cm; exact Hco12 |].
   exact Hco23.
 Qed.
@@ -1421,13 +1364,6 @@ Proof.
     exfalso. apply Hno_n.
     unfold TAP_n.
     exists x, t1, t2, t3.
-    split; [exact Hwt1 |].
-    split; [exact Hwt2 |].
-    split; [exact Hneq12 |].
-    split; [exact Hrt3 |].
-    split; [exact Hneq31 |].
-    split; [exact Hneq32 |].
-    split; [exact Hwr13 |].
-    split; [exact Hcm12 |].
+    repeat (split; [assumption |]).
     exact Hco23.
 Qed.
