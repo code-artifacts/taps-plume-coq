@@ -888,22 +888,45 @@ Proof.
   apply Hco_cm; exact HCO.
 Qed.
 
-(** MonoAtomicView implies ~TAP_i *)
-Lemma MonoAtomicView_no_TAP_i : forall H CM,
-  strict_order CM -> MonoAtomicView H CM -> ~TAP_i H CM.
+(** MonoAtomicView <-> ~TAP_i *)
+Lemma MonoAtomicView_iff_no_TAP_i : forall H CM,
+  commit_order H CM -> (MonoAtomicView H CM <-> ~TAP_i H CM).
 Proof.
-  intros H CM Hstrict HMono.
-  unfold TAP_i. intros [x [y [t1 [t2 [t3 [wx [wy [rx [ry H_tap]]]]]]]]].
-  destruct H_tap as [Hneq [Hwt1 [Hwt2 [Hneq12 [Hrt3 [Hrt3y [Hneq31 [Hneq32 [Hwx [Hwy [Hrx [Hry [Hwrx [Hwry [Hpo HCM_tap]]]]]]]]]]]]]]].
-  unfold MonoAtomicView in HMono.
-  assert (Hcm21: CM t2 t1).
-  { apply (HMono x y t1 t2 t3 Hneq Hwt1 Hwt2 Hneq12 Hrt3y Hneq31 Hneq32).
-    exists wx, wy, rx, ry.
-    repeat (split; [assumption |]).
-    exact Hwrx. }
-  unfold strict_order in Hstrict. destruct Hstrict as [Hirrefl Htrans].
-  assert (Hcycle: CM t1 t1). { eapply Htrans; [exact HCM_tap | exact Hcm21]. }
-  apply Hirrefl in Hcycle. assumption.
+  intros H CM HCM. split.
+  - (* Soundness: MonoAtomicView -> ~TAP_i *)
+    intros HMono.
+    unfold TAP_i. intros [x [y [t1 [t2 [t3 [wx [wy [rx [ry H_tap]]]]]]]]].
+    destruct H_tap as [Hneq [Hwt1 [Hwt2 [Hneq12 [Hrt3 [Hrt3y [Hneq31 [Hneq32 [Hwx [Hwy [Hrx [Hry [Hwrx [Hwry [Hpo HCM_tap]]]]]]]]]]]]]]].
+    unfold MonoAtomicView in HMono.
+    assert (Hcm21: CM t2 t1).
+    { apply (HMono x y t1 t2 t3 Hneq Hwt1 Hwt2 Hneq12 Hrt3y Hneq31 Hneq32).
+      exists wx, wy, rx, ry.
+      repeat (split; [assumption |]).
+      exact Hwrx. }
+    destruct HCM as [Hstrict _].
+    unfold strict_order in Hstrict. destruct Hstrict as [Hirrefl Htrans].
+    assert (Hcycle: CM t1 t1). { eapply Htrans; [exact HCM_tap | exact Hcm21]. }
+    apply Hirrefl in Hcycle. assumption.
+  - (* Completeness: ~TAP_i -> MonoAtomicView *)
+    (* Paper: "Finally we show that if the history H = (T, SO, WR) does not contain
+       any instances of TAP-i, then the MonoAtomicView axiom holds" *)
+    intros Hno_i.
+    unfold MonoAtomicView. intros x y t1 t2 t3 Hxy Hwt1 Hwt2 Hneq12 Hrt3y Hneq31 Hneq32 Hexists.
+    destruct Hexists as [wx [wy [rx [ry [Hwx [Hwy [Hrx [Hry [Hpo_ry_rx [Hwry Hwrx]]]]]]]]]].
+    (* Use totality of commit order: either CM t1 t2 or CM t2 t1 *)
+    destruct HCM as [_ [Htot _]].
+    assert (Ht1: T H t1). { destruct Hwt1; assumption. }
+    assert (Ht2: T H t2). { destruct Hwt2; assumption. }
+    destruct (Htot t1 t2 Ht1 Ht2 Hneq12) as [Hcm12 | Hcm21].
+    + (* Case: CM t1 t2 - contradicts ~TAP_i *)
+      exfalso. apply Hno_i.
+      unfold TAP_i. exists x, y, t1, t2, t3, wx, wy, rx, ry.
+      repeat (split; [assumption |]).
+      split. { unfold RTx. destruct Hrt3y as [Ht3 _]. split; [exact Ht3 | exists rx; exact Hrx]. }
+      repeat (split; [assumption |]).
+      { exact Hcm12. }
+    + (* Case: CM t2 t1 - which is the goal *)
+      assumption.
 Qed.
 
 Theorem RC_soundness_completeness : forall H,
@@ -922,51 +945,20 @@ Proof.
     + (* TAP_h: Reduce to TAP_i using TAP_h_implies_TAP_i lemma *)
       intros Htap_h.
       apply (TAP_h_implies_TAP_i H CM HCM) in Htap_h.
-      destruct HCM as [Hstrict _].
-      exact (MonoAtomicView_no_TAP_i H CM Hstrict HMono Htap_h).
-    + (* TAP_i: Use MonoAtomicView_no_TAP_i lemma *)
-      destruct HCM as [Hstrict _].
-      exact (MonoAtomicView_no_TAP_i H CM Hstrict HMono).
+      exact (proj1 (MonoAtomicView_iff_no_TAP_i H CM HCM) HMono Htap_h).
+    + (* TAP_i: Use MonoAtomicView_iff_no_TAP_i lemma *)
+      exact (proj1 (MonoAtomicView_iff_no_TAP_i H CM HCM) HMono).
   - (* Completeness: no TAPs a-i -> RC *)
-    (* Paper proof strategy:
-       1. First show that (T, SO) with no TAP-a, TAP-b, TAP-g has a valid WR relation
-       2. Then show no TAP-c, TAP-d, TAP-e, TAP-f implies RC-1, RC-2, RC-3
-       3. Finally show no TAP-i implies MonoAtomicView *)
     intros [CM [HCM Hno_taps]].
     unfold ReadCommitted.
-    (* Extract the hypothesis: history is free of TAPs a through i *)
     unfold no_TAP_a_to_i in Hno_taps.
     destruct Hno_taps as [Hno_ag [Hno_h Hno_i]].
     unfold no_TAP_a_to_g in Hno_ag.
     destruct Hno_ag as [Hno_a [Hno_b [Hno_c [Hno_d [Hno_e [Hno_f Hno_g]]]]]].
-    (* Use the RC123_iff_no_TAP_a_to_g lemma in the reverse direction: no TAPs a-g implies RC1/RC2/RC3 *)
     repeat split; try (apply RC123_iff_no_TAP_a_to_g; unfold no_TAP_a_to_g; tauto).
-    (* MonoAtomicView completeness: ~TAP_i -> MonoAtomicView *)
-    (* Paper: "Finally we show that if the history H = (T, SO, WR) does not contain
-       any instances of TAP-i, then the MonoAtomicView axiom holds" *)
-    (* MonoAtomicView states: if t3 reads y from t2 then reads x from t1, 
-       and both t1, t2 write to x, then CM t2 t1 *)
-    (* We prove by showing: if CM t1 t2, then TAP_i occurs, contradicting ~TAP_i *)
-  exists CM. split. assumption.
-  unfold MonoAtomicView. intros x y t1 t2 t3 Hxy Hwt1 Hwt2 Hneq12 Hrt3y Hneq31 Hneq32 Hexists.
-  (* Hexists: t3 reads x from t1 after reading y from t2 (non-monotonic view) *)
-  destruct Hexists as [wx [wy [rx [ry [Hwx [Hwy [Hrx [Hry [Hpo_ry_rx [Hwry Hwrx]]]]]]]]]].
-  (* Use totality of commit order: either CM t1 t2 or CM t2 t1 *)
-  destruct HCM as [_ [Htot _]].
-  assert (Ht1: T H t1). { destruct Hwt1; assumption. }
-  assert (Ht2: T H t2). { destruct Hwt2; assumption. }
-  destruct (Htot t1 t2 Ht1 Ht2 Hneq12) as [Hcm12 | Hcm21].
-  + (* Case: CM t1 t2 - t1 commits before t2 *)
-    (* But t3 reads from t2 (earlier in CM) before reading from t1 (later in CM) *)
-    (* This non-monotonic read order is exactly TAP_i, contradicting ~TAP_i *)
-    exfalso. apply Hno_i.
-    unfold TAP_i. exists x, y, t1, t2, t3, wx, wy, rx, ry.
-    repeat (split; [assumption |]).
-    split. { unfold RTx. destruct Hrt3y as [Ht3 _]. split; [exact Ht3 | exists rx; exact Hrx]. }  (* RTx t3 x *)
-    repeat (split; [assumption |]).
-    { exact Hcm12. }             (* CM t1 t2 - the problematic order *)
-  + (* Case: CM t2 t1 - t2 commits before t1, which is the goal *)
-    assumption.
+    (* ~TAP_i -> MonoAtomicView via MonoAtomicView_iff_no_TAP_i *)
+    exists CM. split. assumption.
+    apply (proj2 (MonoAtomicView_iff_no_TAP_i H CM HCM)). exact Hno_i.
 Qed.
 
 (** * Theorem 4: Soundness and Completeness for RA *)
@@ -975,113 +967,42 @@ Qed.
 Lemma TAP_k_implies_TAP_l : forall H CM,
   commit_order H CM -> TAP_k H -> TAP_l H CM.
 Proof.
-  intros H CM HCM Htap_k.
-  unfold TAP_h in Htap_k.
-  (* destruct Htap_k. *)
-  destruct Htap_k as [x [t1 [t2 [t3 [Hwt1 [Hwt2 [Hneq12 [Hrt3x [Hneq31 [Hneq32 [Hso | Hwr]]]]]]]]]]].
-  - unfold TAP_l.
-    destruct Hso as [Hwr13 [Hco12 Hso23]].
-    exists x, t1, t2, t3.
-    (* CO ⊆ CM from commit_order *)
-    destruct HCM as [_ [_ Hco_cm]].
-    repeat (split; [assumption |]).
-    left.
-    split; [exact Hwr13 |].
-    split; [apply Hco_cm; exact Hco12 |].
-    exact Hso23.
-  - unfold TAP_l.
-    destruct Hwr as [y [Hrt3y [Hwr13 [Hco12 Hwr23]]]].
-    exists x, t1, t2, t3.
-    (* CO ⊆ CM from commit_order *)
-    destruct HCM as [_ [_ Hco_cm]].
-    repeat (split; [assumption |]).
-    right. exists y.
-    split; [exact Hrt3y |].
-    split; [exact Hwr13 |].
-    split; [apply Hco_cm; exact Hco12 |].
-    exact Hwr23.
+  intros H CM [_ [_ Hco_cm]] [x [t1 [t2 [t3 H_tap]]]].
+  exists x, t1, t2, t3.
+  destruct H_tap as [? [? [? [? [? [? [[? [HCO ?]] | [y [? [? [HCO ?]]]]]]]]]]].
+  - repeat (split; [assumption |]). left.
+    repeat (split; [assumption |]). split; [apply Hco_cm; exact HCO |]. assumption.
+  - repeat (split; [assumption |]). right. exists y.
+    repeat (split; [assumption |]). split; [apply Hco_cm; exact HCO |]. assumption.
 Qed.
 
 (** ReadAtomic implies CutIsolation *)
 Lemma ReadAtomic_implies_CutIsolation : forall H CM,
   strict_order CM -> ReadAtomic H CM -> CutIsolation H.
 Proof.
-  intros H CM Hstrict HRA.
+  intros H CM [Hirrefl Htrans] HRA.
   unfold CutIsolation.
-  intros x v v' t t1 t2 r1 r2 w1 w2 Hrt Hwt1 Hneq_t1t Hwt2 Hneq_t2t Hr1 Hr1_eq Hr2 Hr2_eq Hw1 Hw2 Hneq_t1t2 Hneq_r1r2 Hwr1 Hwr2.
-  (* Suppose v <> v', we derive a contradiction *)
-  (* By wr_rel, w1 writes v to x and w2 writes v' to x *)
-  (* If v <> v', then t1 <> t2 (given) *)
-  (* We have: t reads from t1 (w1 -> r1) and t reads from t2 (w2 -> r2) *)
-  
-  (* Get that t, t1, t2 are in T H *)
-  destruct Hrt as [Ht _].
-  destruct Hwt1 as [Ht1 _].
-  destruct Hwt2 as [Ht2 _].
-  
-  (* Extract op_key w1 = x and op_key w2 = x from Wx *)
-  destruct Hw1 as [Hw1_ops [Hw1_is_w Hw1_key]].
-  destruct Hw2 as [Hw2_ops [Hw2_is_w Hw2_key]].
-  destruct Hr1 as [Hr1_ops [Hr1_is_r Hr1_key]].
-  destruct Hr2 as [Hr2_ops [Hr2_is_r Hr2_key]].
-  
-  (* Establish WR x t1 t using wr_implies_WR *)
-  assert (HWR_t1_t: WR H x t1 t).
-  { rewrite <- Hw1_key.
-    apply (wr_implies_WR H t1 t w1 r1).
-    - exact Ht1.
-    - exact Ht.
-    - intro Heq. subst. apply Hneq_t1t. reflexivity.
-    - exact Hw1_ops.
-    - exact Hr1_ops.
-    - exact Hwr1. }
-  
-  (* Establish WR x t2 t using wr_implies_WR *)
-  assert (HWR_t2_t: WR H x t2 t).
-  { rewrite <- Hw2_key.
-    apply (wr_implies_WR H t2 t w2 r2).
-    - exact Ht2.
-    - exact Ht.
-    - intro Heq. subst. apply Hneq_t2t. reflexivity.
-    - exact Hw2_ops.
-    - exact Hr2_ops.
-    - exact Hwr2. }
-  
-  (* Rebuild Hw1, Hw2, Hr1, Hr2 for later use *)
-  assert (Hw1': Wx t1 x w1) by (unfold Wx; auto).
-  assert (Hw2': Wx t2 x w2) by (unfold Wx; auto).
-  assert (Hr1': Rx t x r1) by (unfold Rx; auto).
-  assert (Hr2': Rx t x r2) by (unfold Rx; auto).
-  
-  (* Now apply ReadAtomic in both directions *)
-  (* ReadAtomic: if WTx t1, WTx t2, t1 <> t2, RTx t3, t3 <> t1, t3 <> t2, WR x t1 t3, SO_union_WR t2 t3 -> CM t2 t1 *)
-  
-  (* Rebuild WTx and RTx *)
-  assert (Hwt1': WTx (T H) x t1) by (split; [exact Ht1 | exists w1; exact Hw1']).
-  assert (Hwt2': WTx (T H) x t2) by (split; [exact Ht2 | exists w2; exact Hw2']).
-  assert (Hrt': RTx (T H) x t) by (split; [exact Ht | exists r1; exact Hr1']).
-  
-  (* First application: WR x t1 t and WR x t2 t (as SO_union_WR) gives CM t2 t1 *)
-  assert (Hcm_t2_t1: CM t2 t1).
-  { assert (Hneq_t_t1: t <> t1) by (intro; subst; apply Hneq_t1t; reflexivity).
-    assert (Hneq_t_t2: t <> t2) by (intro; subst; apply Hneq_t2t; reflexivity).
-    apply (HRA x t1 t2 t Hwt1' Hwt2' Hneq_t1t2 Hrt' Hneq_t_t1 Hneq_t_t2 HWR_t1_t).
-    unfold SO_union_WR. right. exists x. exact HWR_t2_t. }
-  
-  (* Second application: WR x t2 t and WR x t1 t (as SO_union_WR) gives CM t1 t2 *)
-  assert (Hrt'': RTx (T H) x t) by (split; [exact Ht | exists r2; exact Hr2']).
-  assert (Hcm_t1_t2: CM t1 t2).
-  { assert (Hneq_t_t1: t <> t1) by (intro; subst; apply Hneq_t1t; reflexivity).
-    assert (Hneq_t_t2: t <> t2) by (intro; subst; apply Hneq_t2t; reflexivity).
-    assert (Hneq_t2t1: t2 <> t1) by (intro; subst; apply Hneq_t1t2; reflexivity).
-    apply (HRA x t2 t1 t Hwt2' Hwt1' Hneq_t2t1 Hrt'' Hneq_t_t2 Hneq_t_t1 HWR_t2_t).
-    unfold SO_union_WR. right. exists x. exact HWR_t1_t. }
-  
-  (* From strict order: CM t1 t2 and CM t2 t1 implies a cycle, contradiction *)
-  destruct Hstrict as [Hirrefl Htrans].
-  assert (Hcycle: CM t1 t1).
-  { eapply Htrans. exact Hcm_t1_t2. exact Hcm_t2_t1. }
-  exfalso. apply (Hirrefl t1). exact Hcycle.
+  intros x v v' t t1 t2 r1 r2 w1 w2 Hrt Hwt1 Hn1 Hwt2 Hn2
+         Hr1 _ Hr2 _ Hw1 Hw2 Hn12 _ Hwr1 Hwr2.
+  (* Extract T-membership without losing WTx/RTx *)
+  pose proof (proj1 Hrt) as Ht.
+  pose proof (proj1 Hwt1) as Ht1.
+  pose proof (proj1 Hwt2) as Ht2.
+  destruct Hw1 as [Hw1o [_ Ek1]], Hw2 as [Hw2o [_ Ek2]],
+           Hr1 as [Hr1o _], Hr2 as [Hr2o _].
+  (* Establish WR relations via wr_implies_WR *)
+  assert (HWR1: WR H x t1 t).
+  { rewrite <- Ek1. exact (wr_implies_WR H t1 t w1 r1 Ht1 Ht Hn1 Hw1o Hr1o Hwr1). }
+  assert (HWR2: WR H x t2 t).
+  { rewrite <- Ek2. exact (wr_implies_WR H t2 t w2 r2 Ht2 Ht Hn2 Hw2o Hr2o Hwr2). }
+  (* Apply ReadAtomic both ways to derive a CM cycle, contradicting strict order *)
+  exfalso. apply (Hirrefl t1). eapply Htrans.
+  - apply (HRA x t2 t1 t Hwt2 Hwt1 (fun e => Hn12 (eq_sym e)) Hrt
+               (fun e => Hn2 (eq_sym e)) (fun e => Hn1 (eq_sym e)) HWR2).
+    right. exists x. exact HWR1.
+  - apply (HRA x t1 t2 t Hwt1 Hwt2 Hn12 Hrt
+               (fun e => Hn1 (eq_sym e)) (fun e => Hn2 (eq_sym e)) HWR1).
+    right. exists x. exact HWR2.
 Qed.
 
 (** ReadAtomic implies MonoAtomicView (ReadAtomic is stronger than MonoAtomicView) *)
@@ -1089,78 +1010,84 @@ Lemma ReadAtomic_implies_MonoAtomicView : forall H CM,
   commit_order H CM -> ReadAtomic H CM -> MonoAtomicView H CM.
 Proof.
   intros H CM HCM Hra.
-  unfold MonoAtomicView. intros x y t1 t2 t3 Hxy Hwt1 Hwt2 Hneq12 Hrt3y Hneq31 Hneq32 Hexists.
+  unfold MonoAtomicView.
+  intros x y t1 t2 t3 Hxy Hwt1 Hwt2 Hneq12 Hrt3y Hneq31 Hneq32 Hexists.
   destruct Hexists as [wx [wy [rx [ry [Hwx [Hwy [Hrx [Hry [Hpo_ry_rx [Hwry Hwrx]]]]]]]]]].
-  
-  (* Get transaction memberships *)
-  destruct Hwt1 as [Ht1 Hwt1_ex].
-  destruct Hwt2 as [Ht2 Hwt2_ex].
-  destruct Hrt3y as [Ht3 _].
-  
-  (* Rebuild WTx for t1 and t2 *)
-  assert (Hwt1': WTx (T H) x t1) by (split; [exact Ht1 | exists wx; exact Hwx]).
-  assert (Hwt2': WTx (T H) x t2) by (split; [exact Ht2 | exact Hwt2_ex]).
-  
-  (* Build RTx for t3 reading x *)
+  (* Extract T-membership without losing WTx/RTx *)
+  pose proof (proj1 Hwt1) as Ht1.
+  pose proof (proj1 Hwt2) as Ht2.
+  pose proof (proj1 Hrt3y) as Ht3.
+  (* Build RTx for t3 reading x before destructing Rx *)
   assert (Hrt3x: RTx (T H) x t3) by (split; [exact Ht3 | exists rx; exact Hrx]).
-  
-  (* Extract ops information *)
-  destruct Hwx as [Hwx_ops [Hwx_is_w Hwx_key]].
-  destruct Hwy as [Hwy_ops [Hwy_is_w Hwy_key]].
-  destruct Hrx as [Hrx_ops [Hrx_is_r Hrx_key]].
-  destruct Hry as [Hry_ops [Hry_is_r Hry_key]].
-  
-  (* Establish WR H x t1 t3 using wr_implies_WR *)
-  assert (HWR_t1_t3: WR H x t1 t3).
-  { rewrite <- Hwx_key.
-    apply (wr_implies_WR H t1 t3 wx rx).
-    - exact Ht1.
-    - exact Ht3.
-    - intro Heq. subst. apply Hneq31. reflexivity.
-    - exact Hwx_ops.
-    - exact Hrx_ops.
-    - exact Hwrx. }
-  
-  (* Establish WR H y t2 t3 using wr_implies_WR *)
-  assert (HWR_t2_t3: WR H y t2 t3).
-  { rewrite <- Hwy_key.
-    apply (wr_implies_WR H t2 t3 wy ry).
-    - exact Ht2.
-    - exact Ht3.
-    - intro Heq. subst. apply Hneq32. reflexivity.
-    - exact Hwy_ops.
-    - exact Hry_ops.
-    - exact Hwry. }
-  
-  (* Build SO_union_WR H t2 t3 from WR y t2 t3 *)
-  assert (Hso_wr: SO_union_WR H t2 t3).
-  { unfold SO_union_WR. right. exists y. exact HWR_t2_t3. }
-  
+  destruct Hwx as [Hwx_ops [_ Ek_wx]], Hwy as [Hwy_ops [_ Ek_wy]],
+           Hrx as [Hrx_ops _], Hry as [Hry_ops _].
+  (* Establish WR relations via wr_implies_WR *)
+  assert (HWR1: WR H x t1 t3).
+  { rewrite <- Ek_wx. exact (wr_implies_WR H t1 t3 wx rx Ht1 Ht3
+      (fun e => Hneq31 (eq_sym e)) Hwx_ops Hrx_ops Hwrx). }
+  assert (HWR2: WR H y t2 t3).
+  { rewrite <- Ek_wy. exact (wr_implies_WR H t2 t3 wy ry Ht2 Ht3
+      (fun e => Hneq32 (eq_sym e)) Hwy_ops Hry_ops Hwry). }
   (* Apply ReadAtomic *)
-  apply (Hra x t1 t2 t3 Hwt1' Hwt2' Hneq12 Hrt3x Hneq31 Hneq32 HWR_t1_t3 Hso_wr).
+  apply (Hra x t1 t2 t3 Hwt1 Hwt2 Hneq12 Hrt3x Hneq31 Hneq32 HWR1).
+  right. exists y. exact HWR2.
 Qed.
 
-(** ReadAtomic implies ~TAP_l *)
-Lemma ReadAtomic_no_TAP_l : forall H CM,
-  strict_order CM -> ReadAtomic H CM -> ~TAP_l H CM.
+(** ReadAtomic <-> ~TAP_l *)
+Lemma ReadAtomic_iff_no_TAP_l : forall H CM,
+  commit_order H CM -> (ReadAtomic H CM <-> ~TAP_l H CM).
 Proof.
-  intros H CM Hstrict HRa.
-  unfold ReadAtomic in HRa.
-  unfold TAP_l. intros [x [t1 [t2 [t3 [Hwxt1 [Hwxt2 [Hneq12 [Hrxt3 [Hneq31 [Hneq32 [Hwr | Hso]]]]]]]]]]].
-  - destruct Hwr as [Hwr13 [Hcm12 Hso23]].
-    assert (Hcm21: CM t2 t1).
-    { apply (HRa x t1 t2 t3 Hwxt1 Hwxt2 Hneq12 Hrxt3 Hneq31 Hneq32 Hwr13).
-      unfold SO_union_WR. left. tauto. }
-    unfold strict_order in Hstrict. destruct Hstrict as [Hirrefl Htrans].
-    assert (Hcycle: CM t1 t1). { eapply Htrans; [exact Hcm12 | exact Hcm21]. }
-    apply Hirrefl in Hcycle. assumption.
-  - destruct Hso as [y [Hryt3 [Hwr13 [Hcm12 Hwr23]]]].
-    assert (Hcm21: CM t2 t1).
-    { apply (HRa x t1 t2 t3 Hwxt1 Hwxt2 Hneq12 Hrxt3 Hneq31 Hneq32 Hwr13).
-      unfold SO_union_WR. right. exists y. tauto. }
-    unfold strict_order in Hstrict. destruct Hstrict as [Hirrefl Htrans].
-    assert (Hcycle: CM t1 t1). { eapply Htrans; [exact Hcm12 | exact Hcm21]. }
-    apply Hirrefl in Hcycle. assumption.
+  intros H CM HCM. split.
+  - (* Soundness: ReadAtomic -> ~TAP_l *)
+    intros HRa.
+    unfold ReadAtomic in HRa.
+    unfold TAP_l. intros [x [t1 [t2 [t3 [Hwxt1 [Hwxt2 [Hneq12 [Hrxt3 [Hneq31 [Hneq32 [Hwr | Hso]]]]]]]]]]].
+    + destruct Hwr as [Hwr13 [Hcm12 Hso23]].
+      assert (Hcm21: CM t2 t1).
+      { apply (HRa x t1 t2 t3 Hwxt1 Hwxt2 Hneq12 Hrxt3 Hneq31 Hneq32 Hwr13).
+        unfold SO_union_WR. left. tauto. }
+      destruct HCM as [Hstrict _].
+      unfold strict_order in Hstrict. destruct Hstrict as [Hirrefl Htrans].
+      assert (Hcycle: CM t1 t1). { eapply Htrans; [exact Hcm12 | exact Hcm21]. }
+      apply Hirrefl in Hcycle. assumption.
+    + destruct Hso as [y [Hryt3 [Hwr13 [Hcm12 Hwr23]]]].
+      assert (Hcm21: CM t2 t1).
+      { apply (HRa x t1 t2 t3 Hwxt1 Hwxt2 Hneq12 Hrxt3 Hneq31 Hneq32 Hwr13).
+        unfold SO_union_WR. right. exists y. tauto. }
+      destruct HCM as [Hstrict _].
+      unfold strict_order in Hstrict. destruct Hstrict as [Hirrefl Htrans].
+      assert (Hcycle: CM t1 t1). { eapply Htrans; [exact Hcm12 | exact Hcm21]. }
+      apply Hirrefl in Hcycle. assumption.
+  - (* Completeness: ~TAP_l -> ReadAtomic *)
+    intros Hno_l.
+    unfold ReadAtomic.
+    intros x t1 t2 t3 Hwt1 Hwt2 Hneq12 Hrt3 Hneq31 Hneq32 Hwr13 Hso_wr.
+    (* Use totality of CM: either CM t1 t2 or CM t2 t1 *)
+    destruct HCM as [_ [Htot _]].
+    assert (Ht1: T H t1). { destruct Hwt1; assumption. }
+    assert (Ht2: T H t2). { destruct Hwt2; assumption. }
+    destruct (Htot t1 t2 Ht1 Ht2 Hneq12) as [Hcm12 | Hcm21]; auto.
+    (* Case: CM t1 t2 - derive contradiction via TAP_l *)
+    exfalso. apply Hno_l.
+    unfold TAP_l.
+    exists x, t1, t2, t3.
+    repeat (split; [assumption |]).
+    unfold SO_union_WR in Hso_wr.
+    destruct Hso_wr as [Hso23 | [y Hwr23]].
+    + (* SO t2 t3 case *)
+      left. split; [exact Hwr13 |]. split; [exact Hcm12 |]. exact Hso23.
+    + (* WR y t2 t3 case *)
+      right.
+      pose proof (wr_reads_writes H y t2 t3 Hwr23) as [_ [Ht3 [_ [vy [Hwrites_t2 Hreads_t3]]]]].
+      exists y.
+      split.
+      { unfold RTx. split; [exact Ht3 |].
+        unfold txn_reads in Hreads_t3.
+        destruct Hreads_t3 as [r [Hrx _]].
+        exists r. exact Hrx. }
+      split; [exact Hwr13 |].
+      split; [exact Hcm12 |].
+      exact Hwr23.
 Qed.
 
 Theorem RA_soundness_completeness : forall H,
@@ -1182,24 +1109,24 @@ Proof.
     unfold no_TAP_a_to_i.
     (* no_TAP_a_to_g from RC123_iff_no_TAP_a_to_g *)
     repeat split; try (apply RC123_iff_no_TAP_a_to_g; auto).
-    + (* TAP_h: reduce to TAP_i, then use MonoAtomicView_no_TAP_i *)
+    + (* TAP_h: reduce to TAP_i, then use MonoAtomicView_iff_no_TAP_i *)
       assert (HMono: MonoAtomicView H CM).
       { apply (ReadAtomic_implies_MonoAtomicView H CM (conj Hstrict HCM_rest) HReadAtomic). }
       intros Htap_h.
       apply (TAP_h_implies_TAP_i H CM (conj Hstrict HCM_rest)) in Htap_h.
-      exact (MonoAtomicView_no_TAP_i H CM Hstrict HMono Htap_h).
-    + (* TAP_i: use MonoAtomicView_no_TAP_i *)
+      exact (proj1 (MonoAtomicView_iff_no_TAP_i H CM (conj Hstrict HCM_rest)) HMono Htap_h).
+    + (* TAP_i: use MonoAtomicView_iff_no_TAP_i *)
       assert (HMono: MonoAtomicView H CM).
       { apply (ReadAtomic_implies_MonoAtomicView H CM (conj Hstrict HCM_rest) HReadAtomic). }
-      exact (MonoAtomicView_no_TAP_i H CM Hstrict HMono).
+      exact (proj1 (MonoAtomicView_iff_no_TAP_i H CM (conj Hstrict HCM_rest)) HMono).
     + (* TAP_j: use CI_soundness_completeness *)
       apply CI_soundness_completeness. exact HCI.
     + (* TAP_k: reduce to TAP_l via TAP_k_implies_TAP_l *)
       intros Htap_k.
       apply (TAP_k_implies_TAP_l H CM (conj Hstrict HCM_rest)) in Htap_k.
-      exact (ReadAtomic_no_TAP_l H CM Hstrict HReadAtomic Htap_k).
-    + (* TAP_l: use ReadAtomic_no_TAP_l directly *)
-      exact (ReadAtomic_no_TAP_l H CM Hstrict HReadAtomic).
+      exact (proj1 (ReadAtomic_iff_no_TAP_l H CM (conj Hstrict HCM_rest)) HReadAtomic Htap_k).
+    + (* TAP_l: use ReadAtomic_iff_no_TAP_l directly *)
+      exact (proj1 (ReadAtomic_iff_no_TAP_l H CM (conj Hstrict HCM_rest)) HReadAtomic).
   - (* Completeness: no TAPs a-l -> RA *)
     intros [CM [HCM Hno_taps]].
     unfold ReadAtomicity.
@@ -1207,44 +1134,13 @@ Proof.
     destruct Hno_taps as [Hno_ai [Hno_j [Hno_k Hno_l]]].
     unfold no_TAP_a_to_i in Hno_ai.
     destruct Hno_ai as [Hno_ag [Hno_h Hno_i]].
-    (* RC1, RC2, RC3 from no_TAP_a_to_g *)
     assert (HRC: RC1 H /\ RC2 H /\ RC3 H).
     { apply RC123_iff_no_TAP_a_to_g. exact Hno_ag. }
     destruct HRC as [HRC1 [HRC2 HRC3]].
     repeat split; auto.
     exists CM. split. assumption.
-    (* Prove ReadAtomic from ~TAP_l *)
-    unfold ReadAtomic.
-    intros x t1 t2 t3 Hwt1 Hwt2 Hneq12 Hrt3 Hneq31 Hneq32 Hwr13 Hso_wr.
-    (* Goal: CM t2 t1 *)
-    (* Use totality of CM: either CM t1 t2 or CM t2 t1 *)
-    destruct HCM as [Hstrict [Htot Hco_cm]].
-    assert (Ht1: T H t1). { destruct Hwt1; assumption. }
-    assert (Ht2: T H t2). { destruct Hwt2; assumption. }
-    destruct (Htot t1 t2 Ht1 Ht2 Hneq12) as [Hcm12 | Hcm21]; auto.
-    (* Case: CM t1 t2 - derive contradiction via TAP_l *)
-    exfalso. apply Hno_l.
-    unfold TAP_l.
-    exists x, t1, t2, t3.
-    repeat (split; [assumption |]).
-    (* Need to show the disjunction for TAP_l *)
-    unfold SO_union_WR in Hso_wr.
-    destruct Hso_wr as [Hso23 | [y Hwr23]].
-    + (* SO t2 t3 case *)
-      left. split; [exact Hwr13 |]. split; [exact Hcm12 |]. exact Hso23.
-    + (* WR y t2 t3 case *)
-      right.
-      pose proof (wr_reads_writes H y t2 t3 Hwr23) as [_ [Ht3 [_ [vy [Hwrites_t2 Hreads_t3]]]]].
-      exists y.
-      split.
-      { (* RTx (T H) y t3 *)
-        unfold RTx. split; [exact Ht3 |].
-        unfold txn_reads in Hreads_t3.
-        destruct Hreads_t3 as [r [Hrx _]].
-        exists r. exact Hrx. }
-      split; [exact Hwr13 |].
-      split; [exact Hcm12 |].
-      exact Hwr23.
+    (* ~TAP_l -> ReadAtomic via ReadAtomic_iff_no_TAP_l *)
+    apply (proj2 (ReadAtomic_iff_no_TAP_l H CM HCM)). exact Hno_l.
 Qed.
 (** * Theorem 5: Soundness and Completeness for TCC *)
 
@@ -1277,20 +1173,33 @@ Proof.
   exact Hco23.
 Qed.
 
-(** Causal implies ~TAP_n *)
-Lemma Causal_no_TAP_n : forall H CM,
-  strict_order CM -> Causal H CM -> ~TAP_n H CM.
+(** Causal <-> ~TAP_n *)
+Lemma Causal_iff_no_TAP_n : forall H CM,
+  commit_order H CM -> (Causal H CM <-> ~TAP_n H CM).
 Proof.
-  intros H CM Hstrict HCausal.
-  unfold TAP_n. intros [x [t1 [t2 [t3 [Hwt1 [Hwt2 [Hneq12 [Hrt3 [Hneq31 [Hneq32 [Hwr13 [Hcm12 Hco23]]]]]]]]]]]].
-  (* TAP_n: WR x t1 t3, CM t1 t2, CO t2 t3 *)
-  (* Causal: if WR x t1 t3 and CO t2 t3, then CM t2 t1 *)
-  assert (Hcm21: CM t2 t1).
-  { apply (HCausal x t1 t2 t3 Hwt1 Hwt2 Hneq12 Hrt3 Hneq31 Hneq32 Hwr13 Hco23). }
-  (* Now we have CM t1 t2 (from Hcm12) and CM t2 t1 (from Hcm21), contradiction *)
-  unfold strict_order in Hstrict. destruct Hstrict as [Hirrefl Htrans].
-  assert (Hcycle: CM t1 t1). { eapply Htrans; [exact Hcm12 | exact Hcm21]. }
-  apply Hirrefl in Hcycle. assumption.
+  intros H CM HCM. split.
+  - (* Soundness: Causal -> ~TAP_n *)
+    intros HCausal.
+    unfold TAP_n. intros [x [t1 [t2 [t3 [Hwt1 [Hwt2 [Hneq12 [Hrt3 [Hneq31 [Hneq32 [Hwr13 [Hcm12 Hco23]]]]]]]]]]]].
+    assert (Hcm21: CM t2 t1).
+    { apply (HCausal x t1 t2 t3 Hwt1 Hwt2 Hneq12 Hrt3 Hneq31 Hneq32 Hwr13 Hco23). }
+    destruct HCM as [Hstrict _].
+    unfold strict_order in Hstrict. destruct Hstrict as [Hirrefl Htrans].
+    assert (Hcycle: CM t1 t1). { eapply Htrans; [exact Hcm12 | exact Hcm21]. }
+    apply Hirrefl in Hcycle. assumption.
+  - (* Completeness: ~TAP_n -> Causal *)
+    intros Hno_n.
+    unfold Causal.
+    intros x t1 t2 t3 Hwt1 Hwt2 Hneq12 Hrt3 Hneq31 Hneq32 Hwr13 Hco23.
+    destruct HCM as [_ [Htot _]].
+    assert (Ht1: T H t1). { destruct Hwt1; assumption. }
+    assert (Ht2: T H t2). { destruct Hwt2; assumption. }
+    destruct (Htot t1 t2 Ht1 Ht2 Hneq12) as [Hcm12 | Hcm21]; auto.
+    exfalso. apply Hno_n.
+    unfold TAP_n.
+    exists x, t1, t2, t3.
+    repeat (split; [assumption |]).
+    exact Hco23.
 Qed.
 
 Theorem TCC_soundness_completeness : forall H,
@@ -1311,31 +1220,31 @@ Proof.
     unfold no_TAP_a_to_i.
     (* Use RC123_iff_no_TAP_a_to_g to show no_TAP_a_to_g *)
     repeat split; try (apply RC123_iff_no_TAP_a_to_g; auto).
-    + (* TAP_h: reduce to TAP_i, then use MonoAtomicView_no_TAP_i *)
+    + (* TAP_h: reduce to TAP_i, then use MonoAtomicView_iff_no_TAP_i *)
       assert (HMono: MonoAtomicView H CM).
       { apply (ReadAtomic_implies_MonoAtomicView H CM (conj Hstrict HCM_rest) HReadAtomic). }
       intros Htap_h.
       apply (TAP_h_implies_TAP_i H CM (conj Hstrict HCM_rest)) in Htap_h.
-      exact (MonoAtomicView_no_TAP_i H CM Hstrict HMono Htap_h).
-    + (* TAP_i: use MonoAtomicView_no_TAP_i *)
+      exact (proj1 (MonoAtomicView_iff_no_TAP_i H CM (conj Hstrict HCM_rest)) HMono Htap_h).
+    + (* TAP_i: use MonoAtomicView_iff_no_TAP_i *)
       assert (HMono: MonoAtomicView H CM).
       { apply (ReadAtomic_implies_MonoAtomicView H CM (conj Hstrict HCM_rest) HReadAtomic). }
-      exact (MonoAtomicView_no_TAP_i H CM Hstrict HMono).
+      exact (proj1 (MonoAtomicView_iff_no_TAP_i H CM (conj Hstrict HCM_rest)) HMono).
     + (* TAP_j: use CI_soundness_completeness *)
       apply CI_soundness_completeness.
       apply (ReadAtomic_implies_CutIsolation H CM Hstrict HReadAtomic).
-    + (* TAP_k: use ReadAtomic_no_TAP_l via TAP_k_implies_TAP_l *)
+    + (* TAP_k: use ReadAtomic_iff_no_TAP_l via TAP_k_implies_TAP_l *)
       intros Htap_k.
       apply (TAP_k_implies_TAP_l H CM (conj Hstrict HCM_rest)) in Htap_k.
-      exact (ReadAtomic_no_TAP_l H CM Hstrict HReadAtomic Htap_k).
-    + (* TAP_l: use ReadAtomic_no_TAP_l directly *)
-      exact (ReadAtomic_no_TAP_l H CM Hstrict HReadAtomic).
+      exact (proj1 (ReadAtomic_iff_no_TAP_l H CM (conj Hstrict HCM_rest)) HReadAtomic Htap_k).
+    + (* TAP_l: use ReadAtomic_iff_no_TAP_l directly *)
+      exact (proj1 (ReadAtomic_iff_no_TAP_l H CM (conj Hstrict HCM_rest)) HReadAtomic).
     + (* TAP_m: reduce to TAP_n via TAP_m_implies_TAP_n *)
       intros Htap_m.
       apply (TAP_m_implies_TAP_n H CM (conj Hstrict HCM_rest)) in Htap_m.
-      exact (Causal_no_TAP_n H CM Hstrict HCausal Htap_m).
-    + (* TAP_n: use Causal_no_TAP_n directly *)
-      exact (Causal_no_TAP_n H CM Hstrict HCausal).
+      exact (proj1 (Causal_iff_no_TAP_n H CM (conj Hstrict HCM_rest)) HCausal Htap_m).
+    + (* TAP_n: use Causal_iff_no_TAP_n directly *)
+      exact (proj1 (Causal_iff_no_TAP_n H CM (conj Hstrict HCM_rest)) HCausal).
   - (* Completeness: no all TAPs -> TCC *)
     intros [CM [HCM Hno_taps]].
     unfold TransactionalCausalConsistency.
@@ -1345,25 +1254,11 @@ Proof.
     destruct Hno_al as [Hno_ai [Hno_j [Hno_k Hno_l]]].
     unfold no_TAP_a_to_i in Hno_ai.
     destruct Hno_ai as [Hno_ag [Hno_h Hno_i]].
-    (* RC1, RC2, RC3 from no_TAP_a_to_g *)
     assert (HRC: RC1 H /\ RC2 H /\ RC3 H).
     { apply RC123_iff_no_TAP_a_to_g. exact Hno_ag. }
     destruct HRC as [HRC1 [HRC2 HRC3]].
     repeat split; auto.
     exists CM. split. assumption.
-    (* Prove Causal from ~TAP_n *)
-    unfold Causal.
-    intros x t1 t2 t3 Hwt1 Hwt2 Hneq12 Hrt3 Hneq31 Hneq32 Hwr13 Hco23.
-    (* Goal: CM t2 t1 *)
-    (* Use totality of CM: either CM t1 t2 or CM t2 t1 *)
-    destruct HCM as [Hstrict [Htot Hco_cm]].
-    assert (Ht1: T H t1). { destruct Hwt1; assumption. }
-    assert (Ht2: T H t2). { destruct Hwt2; assumption. }
-    destruct (Htot t1 t2 Ht1 Ht2 Hneq12) as [Hcm12 | Hcm21]; auto.
-    (* Case: CM t1 t2 - derive contradiction via TAP_n *)
-    exfalso. apply Hno_n.
-    unfold TAP_n.
-    exists x, t1, t2, t3.
-    repeat (split; [assumption |]).
-    exact Hco23.
+    (* ~TAP_n -> Causal via Causal_iff_no_TAP_n *)
+    apply (proj2 (Causal_iff_no_TAP_n H CM HCM)). exact Hno_n.
 Qed.
