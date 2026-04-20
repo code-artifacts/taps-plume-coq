@@ -740,95 +740,39 @@ Proof.
       split. { exact Hintra. }
       { exact Hpo_rw. }
     }
-    split. { 
+    split. {
       (* RC2 completeness: ~TAP_d /\ ~TAP_e -> RC2 *)
-      (* Paper: If RC-2 is violated, then TAP-d or TAP-e would happen *)
-      unfold RC2. intros x t r Ht Hrx Hpreceded.
-      destruct Hpreceded as [w_pre [Hwx_pre Hpo_pre]].
-      (* r is a read on x in t, preceded by some write w_pre *)
-      (* r must read from somewhere: internal write or external write *)
+      assert (Hwr_xvr: forall xv vv, wr_rel (Write xv vv) (Read xv vv))
+        by (intros; exists xv, vv; auto).
+      unfold RC2. intros x t r Ht Hrx [w_pre [Hwx_pre Hpo_pre]].
       destruct Hrx as [Hr_ops [Hr_is_r Hr_key]].
-      destruct r as [xr vr | xr vr]; try contradiction. (* r is Read xr vr *)
+      destruct r as [xr vr | xr vr]; try contradiction.
       simpl in Hr_key. subst xr.
-      
-      (* By read_completeness, r reads from internal or external *)
-      assert (Hrx': Rx t x (Read x vr)).
-      { split; [exact Hr_ops | split; [simpl; auto | simpl; auto]]. }
-      destruct (read_completeness H t x (Read x vr) vr Ht Hrx' eq_refl) as [Hinternal | Hexternal].
-      - (* Case: Internal read - r reads from internal write w_int *)
-        destruct Hinternal as [w_int [Hwx_int [Hw_int_eq Hpo_int]]].
-        subst w_int.
-        (* We need to find the LAST write before r *)
-        (* We know Write x vr is a write before r *)
-        (* Show that Write x vr is the last write before r, or derive contradiction via TAP_e *)
-        exists (Write x vr).
-        split. { exact Hwx_int. }
-        split. { exact Hpo_int. }
-        split. { unfold wr_rel. exists x, vr. split; reflexivity. }
-        (* Show: forall w'', Wx t x w'' -> po t w'' (Write x vr) \/ w'' = Write x vr \/ po t (Read x vr) w'' *)
+      assert (Hrx': Rx t x (Read x vr)) by (split; [| split; simpl]; auto).
+      destruct (read_completeness H t x _ vr Ht Hrx' eq_refl) as
+        [[w_int [Hwx_int [-> Hpo_int]]] | [t' [Ht' [Hwr' Hwrites_t']]]].
+      - (* Internal read *)
+        exists (Write x vr). repeat (split; [assumption |]).
+        split; [apply Hwr_xvr |].
         intros w'' Hwx''.
-        destruct (Op_eq_dec w'' (Write x vr)) as [Heq | Hneq_w].
-        + (* w'' = Write x vr *)
-          right. left. exact Heq.
-        + (* w'' <> Write x vr *)
-          destruct (po_strict_total t) as [Hstrict Htot].
-          assert (Hw''_ops: ops t w''). { destruct Hwx'' as [H1 _]; exact H1. }
-          assert (Hw''_is_w: is_write w''). { destruct Hwx'' as [_ [H1 _]]; exact H1. }
-          assert (Hwxvr_ops: ops t (Write x vr)). { destruct Hwx_int as [H1 _]; exact H1. }
-          destruct (Htot w'' (Write x vr) Hw''_ops Hwxvr_ops Hneq_w) as [Hpo_w''_wvr | Hpo_wvr_w''].
-          * (* po t w'' (Write x vr) - w'' is before the write vr *)
-            left. exact Hpo_w''_wvr.
-          * (* po t (Write x vr) w'' - w'' is after the write vr *)
-            (* Now: is w'' before r or after r? *)
-            assert (Hneq_w''_r: w'' <> Read x vr).
-            { intro Hsubst. subst w''. unfold is_write in Hw''_is_w. simpl in Hw''_is_w. exact Hw''_is_w. }
-            destruct (Htot w'' (Read x vr) Hw''_ops Hr_ops Hneq_w''_r) as [Hpo_w''_r | Hpo_r_w''].
-            -- (* po t w'' (Read x vr) - w'' is before r *)
-               (* So we have Write x vr <po w'' <po r, but r reads from Write x vr *)
-               (* This gives TAP_e: r reads from Write x vr but w'' is after it and before r *)
-               exfalso. apply Hno_e.
-               unfold TAP_e.
-               exists x, t, (Write x vr), w'', (Read x vr).
-               split. { exact Ht. }
-               split. { exact Hwx_int. }
-               split. { exact Hwx''. }
-               split. { apply not_eq_sym. exact Hneq_w. }
-               split. { exact Hrx'. }
-               split. { exact Hpo_wvr_w''. }
-               split. { exact Hpo_w''_r. }
-               { unfold wr_rel. exists x, vr. split; reflexivity. }
-            -- (* po t (Read x vr) w'' - w'' is after r *)
-               right. right. exact Hpo_r_w''.
-      - (* Case: External read - r reads from external t' *)
-        (* This gives TAP_d: t has written to x (w_pre) before reading r, but r reads from external t' *)
-        destruct Hexternal as [t' [Ht' [Hwr' Hwrites_t']]].
-        exfalso. apply Hno_d.
-        unfold TAP_d.
-        (* Need to find the actual write operation in t' *)
-        unfold txn_writes in Hwrites_t'.
-        destruct Hwrites_t' as [w' [Hwx_t' [Hw'_eq Hlast_w']]].
-        subst w'.
+        destruct (Op_eq_dec w'' (Write x vr)) as [-> | Hneq_w]; [tauto |].
+        destruct (po_strict_total t) as [_ Htot].
+        assert (Hw''_ops: ops t w'') by (destruct Hwx'' as [H1 _]; exact H1).
+        assert (Hw''_is_w: is_write w'') by (destruct Hwx'' as [_ [H1 _]]; exact H1).
+        destruct (Htot w'' (Write x vr) Hw''_ops (proj1 Hwx_int) Hneq_w); [tauto |].
+        assert (w'' <> Read x vr) by (intro; subst; exact Hw''_is_w).
+        destruct (Htot w'' (Read x vr) Hw''_ops Hr_ops) as [Hpo_w''_r |]; auto.
+        exfalso. apply Hno_e. unfold TAP_e.
+        exists x, t, (Write x vr), w'', (Read x vr).
+        repeat (split; [assumption || (apply not_eq_sym; assumption) || apply Hwr_xvr |]).
+        apply Hwr_xvr.
+      - (* External read -> TAP_d contradiction *)
+        destruct Hwrites_t' as [w' [Hwx_t' [-> _]]].
+        exfalso. apply Hno_d. unfold TAP_d.
         exists x, t, t', w_pre, (Read x vr), (Write x vr).
-        split. { exact Ht. }
-        split. { exact Ht'. }
-        split. { 
-          (* t <> t' *)
-          intro Heq. subst t'.
-          (* If t = t', then WR x t t, but WR requires t <> s *)
-          pose proof (wr_reads_writes H x t t Hwr') as [_ [_ [Hneq _]]].
-          contradiction.
-        }
-        split. { 
-          (* WTx (T H) x t *)
-          unfold WTx. split; [exact Ht | exists w_pre; exact Hwx_pre].
-        }
-        split. { 
-          (* WTx (T H) x t' *)
-          unfold WTx. split; [exact Ht' | exists (Write x vr); exact Hwx_t'].
-        }
-        repeat (split; [assumption |]).
-        split. { unfold wr_rel. exists x, vr. split; reflexivity. }
-        { exact Hpo_pre. }
+        assert (Hneq_tt': t <> t') by (intro Heq; subst t'; destruct (wr_reads_writes H x t t Hwr') as [_ [_ []]]; auto).
+        repeat (split; [assumption || (unfold WTx; split; [assumption | eauto]) || apply Hwr_xvr |]).
+        auto.
     }
     (* RC3 completeness: ~TAP_f -> RC3 *)
     (* Paper: "Third, if RC-(3) is violated, then TAP-f would happen" *)
