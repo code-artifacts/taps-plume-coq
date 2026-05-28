@@ -181,14 +181,38 @@ Record History := {
   (** Operations belong to unique transactions *)
   op_txn_unique : forall t1 t2 o,
     ops t1 o -> ops t2 o -> t1 = t2;
-
-  (** wr_rel implies WR *)
-  wr_implies_WR : forall t1 t2 w r,
-    T t1 -> T t2 -> t1 <> t2 ->
-    ops t1 w -> ops t2 r ->
-    wr_rel w r ->
-    WR (op_key w) t1 t2
 }.
+
+(** Operation-level write/read facts induce transaction-level WR. *)
+Theorem wr_implies_WR : forall H t1 t2 w r,
+  T H t1 -> T H t2 -> t1 <> t2 ->
+  ops t1 w -> ops t2 r ->
+  wr_rel w r ->
+  WR H (op_key w) t1 t2.
+Proof.
+  intros H t1 t2 w r Ht1 Ht2 Hneq Hw Hr Hwr.
+  destruct Hwr as [x [v [Hw_eq Hr_eq]]].
+  subst w r.
+  simpl.
+  assert (Hrx: Rx t2 x (Read x v)).
+  { repeat split; simpl; auto. }
+  destruct (read_completeness H t2 x (Read x v) v Ht2 Hrx eq_refl) as
+    [[w_int [Hwx_int [Hw_int_eq Hpo_int]]] |
+     [t' [Ht' [HWR Hwrites]]]].
+  - destruct Hwx_int as [Hw_int_ops _].
+    subst w_int.
+    exfalso.
+    apply Hneq.
+    exact (op_txn_unique H t1 t2 (Write x v) Hw Hw_int_ops).
+  - unfold txn_writes in Hwrites.
+    destruct Hwrites as [w_src [Hwx_src [Hw_src_eq _]]].
+    destruct Hwx_src as [Hw_src_ops _].
+    subst w_src.
+    assert (Ht1_eq_t': t1 = t') by
+      exact (op_txn_unique H t1 t' (Write x v) Hw Hw_src_ops).
+    subst t'.
+    exact HWR.
+Qed.
 
 (** Union of session order and write-read relations *)
 Definition SO_union_WR (H : History) : relation Transaction :=
