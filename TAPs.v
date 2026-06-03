@@ -183,13 +183,9 @@ Record History := {
     w1 = w2;
   
   (** WR constraints *)
-  wr_reads_writes : forall x t s,
-    WR x t s -> T t /\ T s /\ t <> s /\
-    exists v, t ⊢ W(x, v) /\ s ⊢ R(x, v);
-    
-  wr_unique : forall x s,
-    T s -> (exists v, s ⊢ R(x, v)) ->
-    exists! t, T t /\ WR x t s;
+  wr_unique : forall t x r,
+    T t -> Rx t x r ->
+    exists! w, exists ts, T ts /\ Wx ts x w /\ wr_rel w r;
 
   (** (SO U WR) is acyclic**)
   so_wr_acyclic : strict_order (clos_trans Transaction (fun t1 t2 => SO t1 t2 \/ exists x, WR x t1 t2));
@@ -198,61 +194,50 @@ Record History := {
   
   (** Disjointness of Committed and Aborted Transactions *)
   disjoint_T_Taborted : forall t, T t -> ~Taborted t;
-  
-  (** Completeness of Reads: Every read must come from somewhere (internal or external) *)
-  read_completeness : forall t x r v,
-    T t -> Rx t x r -> op_value r = v ->
-    (exists w, Wx t x w /\ op_value w = v /\ po t w r) \/  (* Internal read *)
-    (exists t', T t' /\ WR x t' t /\ t' ⊢ W(x, v));      (* External read *)
     
   (** Operations belong to unique transactions. *)
   op_txn_unique : forall t1 t2 o,
     ops t1 o -> ops t2 o -> t1 = t2;
+
+  (** Operation-level write/read facts iff transaction-level WR. *)
+  wr_iff_WR : forall x t s,
+    WR x t s <->
+      T t /\ T s /\ t <> s /\
+      exists w r,
+        Wx t x w /\ Rx s x r /\ wr_rel w r
 }.
 
-(** Operation-level write/read facts induce transaction-level WR. *)
-Theorem wr_implies_WR : forall H t1 t2 w r,
-  T H t1 -> T H t2 -> t1 <> t2 ->
-  ops t1 w -> ops t2 r ->
-  wr_rel w r ->
-  WR H (op_key w) t1 t2.
+(** Consequences of the History well-formedness assumptions. *)
+
+Lemma read_has_committed_source : forall H t x r,
+  T H t ->
+  Rx t x r ->
+  exists ts w, T H ts /\ Wx ts x w /\ wr_rel w r.
 Proof.
-  intros H t1 t2 w r Ht1 Ht2 Hneq Hw Hr Hwr.
-  destruct Hwr as [Hw_is_write [Hr_is_read [Hkey Hvalue]]].
-  assert (Hrx: Rx t2 (op_key w) r).
-  { repeat split; auto. }
-  destruct (read_completeness H t2 (op_key w) r (op_value r) Ht2 Hrx eq_refl) as
-    [[w_int [Hwx_int [Hw_int_eq Hpo_int]]] |
-     [t' [Ht' [HWR Hwrites]]]].
-  - destruct Hwx_int as [Hw_int_ops [Hw_int_is_write Hw_int_key]].
-    exfalso.
-    apply Hneq.
-    assert (Hwx: Wx t1 (op_key w) w) by (repeat split; auto).
-    assert (Heq_w: w = w_int).
-    { apply (unique_values H t1 t2 (op_key w) (op_value r)
-        (or_introl Ht1) (or_introl Ht2) w w_int).
-      - exact Hwx.
-      - exact Hvalue.
-      - repeat split; auto.
-      - exact Hw_int_eq. }
-    subst w_int.
-    exact (op_txn_unique H t1 t2 w Hw Hw_int_ops).
-  - unfold txn_writes in Hwrites.
-    destruct Hwrites as [w_src [Hwx_src [Hw_src_eq _]]].
-    destruct Hwx_src as [Hw_src_ops [Hw_src_is_write Hw_src_key]].
-    assert (Hwx: Wx t1 (op_key w) w) by (repeat split; auto).
-    assert (Heq_w: w = w_src).
-    { apply (unique_values H t1 t' (op_key w) (op_value r)
-        (or_introl Ht1) (or_introl Ht') w w_src).
-      - exact Hwx.
-      - exact Hvalue.
-      - repeat split; auto.
-      - exact Hw_src_eq. }
-    subst w_src.
-    assert (Ht1_eq_t': t1 = t') by
-      exact (op_txn_unique H t1 t' w Hw Hw_src_ops).
-    subst t'.
-    exact HWR.
+  intros H t x r Ht Hrx.
+  destruct (wr_unique H t x r Ht Hrx) as [w [[ts [Hts [Hwx Hwr]]] _]].
+  exists ts, w. exact (conj Hts (conj Hwx Hwr)).
+Qed.
+
+Lemma wr_implies_WR : forall H t s w r,
+  T H t ->
+  T H s ->
+  t <> s ->
+  ops t w ->
+  ops s r ->
+  wr_rel w r ->
+  WR H (op_key w) t s.
+Proof.
+  intros H t s w r Ht Hs Hneq Hw_ops Hr_ops Hwr.
+  apply (proj2 (wr_iff_WR H (op_key w) t s)).
+  destruct Hwr as [Hw_is_w [Hr_is_r [Hkey Hvalue]]].
+  repeat split; auto.
+  exists w, r.
+  split.
+  - split; [exact Hw_ops | split; [exact Hw_is_w | reflexivity]].
+  - split.
+    + split; [exact Hr_ops | split; [exact Hr_is_r | symmetry; exact Hkey]].
+    + split; [exact Hw_is_w | split; [exact Hr_is_r | split; [exact Hkey | exact Hvalue]]].
 Qed.
 
 (** Union of session order and write-read relations *)
@@ -576,90 +561,44 @@ Proof.
     destruct HRC as [HRC1 [HRC2 HRC3]].
     unfold no_TAP_a_to_g.
     repeat split.
-    + (* TAP_a: ThinAirRead - subsumed by Definition 2 (read_completeness) *)
+    + (* TAP_a: ThinAirRead - subsumed by Definition 2 (wr_unique) *)
       unfold TAP_a. intros [r [t [Ht [Hr Hno_write]]]].
-      (* TAP_a: There exists a read r (in t) that reads from NO write (neither internal nor external) *)
       destruct Hr as [Hops Hr_is_r].
-      destruct r as [oid x val | oid x val]; try contradiction. (* r is Read x val *)
-      
-      (* Use read_completeness from History *)
-      (* Need to prove Rx t x (Read x val) first *)
-      assert (Hrx: Rx t x (@Read oid x val)).
-      { split; [exact Hops | split; [simpl; auto | simpl; auto]]. }
-      destruct (read_completeness H t x (@Read oid x val) val) as [Hinternal | Hexternal]; auto.
-      * (* Case 1: Internal read - r reads from internal write w in t *)
-        destruct Hinternal as [w [Hwx [Hval Hpo]]].
-        (* w is a write in t with w = Write x val *)
-        (* Hno_write says: for all w t', if (T H t' \/ Taborted t') /\ W t' w, then ~wr_rel w (Read x val) *)
-        (* But we have w = Write x val in t, and T H t, so contradiction *)
-        apply (Hno_write w t).
-        split.
-        { left. exact Ht. }
-        { unfold W. destruct Hwx as [Hwx_ops [Hw_is_w _]]. split; assumption. }
-        (* Show wr_rel w (Read x val): w = Write x val and r = Read x val *)
-        destruct Hwx as [_ [Hw_is_w Hw_key]].
-        unfold wr_rel. repeat split; simpl; auto.
-      * (* Case 2: External read - r reads from t' via WR *)
-        destruct Hexternal as [t' [Ht' [Hwr Hwrites]]].
-        (* t' writes to x with value val. The write op is w' *)
-        unfold txn_writes in Hwrites. destruct Hwrites as [w' [Hwx' [Hval' Hlast]]].
-        (* Hno_write says: for all w t', if (T H t' \/ Taborted t') /\ W t' w, then ~wr_rel w (Read x val) *)
-        (* But we have Write x val in t', and T H t', so contradiction *)
-        apply (Hno_write w' t').
-        split.
-        { left. exact Ht'. }
-        { unfold W. destruct Hwx' as [Hwx_ops [Hw_is_w _]]. split; assumption. }
-        (* Show wr_rel (Write x val) (Read x val) *)
-        destruct Hwx' as [_ [Hw_is_w Hw_key]].
-        unfold wr_rel. repeat split; simpl; auto.
+      assert (Hrx: Rx t (op_key r) r).
+      { repeat split; auto. }
+      destruct (read_has_committed_source H t (op_key r) r Ht Hrx)
+        as [ts [w [Hts [Hwx Hwr]]]].
+      pose proof (Hno_write w ts) as Hnot.
+      apply Hnot.
+      split.
+      * left. exact Hts.
+      * unfold W. destruct Hwx as [Hwx_ops [Hw_is_w _]].
+        split; assumption.
+      * exact Hwr.
     + (* TAP_b: AbortedRead - subsumed by Definition 2 (disjoint_T_Taborted, unique_values, op_txn_unique) *)
       unfold TAP_b. intros [r [w [t [ta [Ht [Hr [Hta [Hw Hwr]]]]]]]].
-      (* TAP_b: A committed transaction t reads r, and r matches a write w from aborted transaction ta *)
-      (* wr_rel w r means w = Write x v and r = Read x v for some x, v *)
       destruct Hwr as [Hwr_write [Hwr_read [Hwr_key Hwr_value]]].
-      (* Now we need to derive a contradiction *)
-      (* The read Read x v is in committed transaction t *)
-      (* By read_completeness, it must read from either internal or external committed write *)
       destruct Hr as [Hr_ops Hr_is_r].
       assert (Hrx: Rx t (op_key w) r).
-      { repeat split; auto. }
-      destruct (read_completeness H t (op_key w) r (op_value r)) as [Hinternal | Hexternal]; auto.
-      * (* Internal read: t has a write to x with value v *)
-        destruct Hinternal as [w' [Hwx' [Hval' Hpo']]].
-        (* w' has the same written key/value as w in ta; value uniqueness
-           makes them the same operation, then op_txn_unique gives t = ta. *)
-        destruct Hw as [Hops_ta Hw_is_w].
-        destruct Hwx' as [Hops_t [Hw'_is_w Hw'_key]].
-        assert (Heq_w: w' = w).
-        { apply (unique_values H t ta (op_key w) (op_value r)
-            (or_introl Ht) (or_intror Hta) w' w).
-          - repeat split; auto.
-          - exact Hval'.
-          - repeat split; auto.
-          - exact Hwr_value. }
-        subst w'.
-        assert (Heq_t_ta: t = ta) by
-          exact (op_txn_unique H t ta w Hops_t Hops_ta).
-        subst ta. apply (disjoint_T_Taborted H t); assumption.
-      * (* External read: t reads from some committed t' *)
-        destruct Hexternal as [t' [Ht' [Hwr' Hwrites]]].
-        (* t' ⊢ W(x, v), so t' has the last write Write x v *)
-        unfold txn_writes in Hwrites.
-        destruct Hwrites as [w_last [Hwx_last [Hval_last _]]].
-        (* Write x v is in both t' (committed) and ta (aborted) *)
-        destruct Hw as [Hops_ta Hw_is_w].
-        destruct Hwx_last as [Hops_t' [Hw_is_w' Hw_key']].
-        assert (Heq_w: w_last = w).
-        { apply (unique_values H t' ta (op_key w) (op_value r)
-            (or_introl Ht') (or_intror Hta) w_last w).
-          - repeat split; auto.
-          - exact Hval_last.
-          - repeat split; auto.
-          - exact Hwr_value. }
-        subst w_last.
-        assert (Heq_t'_ta: t' = ta) by
-          exact (op_txn_unique H t' ta w Hops_t' Hops_ta).
-        subst ta. apply (disjoint_T_Taborted H t'); assumption.
+      { split; [exact Hr_ops | split; [exact Hr_is_r | symmetry; exact Hwr_key]]. }
+      destruct (read_has_committed_source H t (op_key w) r Ht Hrx)
+        as [ts [w' [Hts [Hwx' Hwr']]]].
+      destruct Hw as [Hops_ta Hw_is_w].
+      assert (Hwx_aborted: Wx ta (op_key w) w).
+      { split; [exact Hops_ta | split; [exact Hw_is_w | reflexivity]]. }
+      destruct Hwr' as [_ [_ [_ Hwr'_value]]].
+      assert (Heq_w: w' = w).
+      { apply (unique_values H ts ta (op_key w) (op_value r)
+          (or_introl Hts) (or_intror Hta) w' w).
+        - exact Hwx'.
+        - exact Hwr'_value.
+        - exact Hwx_aborted.
+        - exact Hwr_value. }
+      subst w'.
+      destruct Hwx' as [Hops_ts _].
+      assert (Heq_ts_ta: ts = ta) by
+        exact (op_txn_unique H ts ta w Hops_ts Hops_ta).
+      subst ta. apply (disjoint_T_Taborted H ts); assumption.
     + (* TAP_c *) unfold TAP_c. intros [t [w [r [Ht [Hw [Hr [Hwr Hpo]]]]]]].
       unfold RC1 in HRC1.
       (* By RC1, if wr_rel w r, then po t w r *)
@@ -820,39 +759,61 @@ Proof.
     split. {
       (* RC2 completeness: ~TAP_d /\ ~TAP_e -> RC2 *)
       unfold RC2. intros x t r Ht Hrx [w_pre [Hwx_pre Hpo_pre]].
-      destruct Hrx as [Hr_ops [Hr_is_r Hr_key]].
-      destruct r as [oid xr vr | oid xr vr]; try contradiction.
-      simpl in Hr_key. subst xr.
-      assert (Hrx': Rx t x (@Read oid x vr)) by (split; [| split; simpl]; auto).
-      destruct (read_completeness H t x _ vr Ht Hrx' eq_refl) as
-        [[w_int [Hwx_int [Hval_int Hpo_int]]] | [t' [Ht' [Hwr' Hwrites_t']]]].
-      - (* Internal read *)
-        destruct Hwx_int as [Hw_int_ops [Hw_int_write Hw_int_key]].
-        exists w_int.
-        split. { repeat split; assumption. }
-        split. { exact Hpo_int. }
-        split.
-        { unfold wr_rel. repeat split; simpl; auto. }
-        intros w'' Hwx''.
-        destruct (Op_eq_dec w'' w_int) as [-> | Hneq_w]; [tauto |].
+      destruct (read_has_committed_source H t x r Ht Hrx)
+        as [ts [w_src [Hts [Hwx_src Hwr_src]]]].
+      destruct (classic (ts = t)) as [Heq_ts | Hneq_ts].
+      - (* Internal source *)
+        subst ts.
+        destruct Hwx_src as [Hw_src_ops [Hw_src_is_w Hw_src_key]].
+        destruct Hrx as [Hr_ops [Hr_is_r Hr_key]].
+        assert (Hneq_src_r: w_src <> r).
+        { intro Heq. subst w_src. destruct r; contradiction. }
         destruct (po_strict_total t) as [_ Htot].
-        assert (Hw''_ops: ops t w'') by (destruct Hwx'' as [H1 _]; exact H1).
-        assert (Hw''_is_w: is_write w'') by (destruct Hwx'' as [_ [H1 _]]; exact H1).
-        assert (Hw''_key: op_key w'' = x) by (destruct Hwx'' as [_ [_ H1]]; exact H1).
-        destruct (Htot w'' w_int Hw''_ops Hw_int_ops Hneq_w); [tauto |].
-        assert (w'' <> @Read oid x vr) by (intro; subst; exact Hw''_is_w).
-        destruct (Htot w'' (@Read oid x vr) Hw''_ops Hr_ops) as [Hpo_w''_r |]; auto.
-        exfalso. apply Hno_e. unfold TAP_e.
-        exists x, t, w_int, w'', (@Read oid x vr).
-        repeat split; try assumption; try (apply not_eq_sym; assumption).
-      - (* External read -> TAP_d contradiction *)
-        destruct Hwrites_t' as [w' [Hwx_t' [Hval_w' _]]].
-        exfalso. apply Hno_d. unfold TAP_d.
-        exists x, t, t', w_pre, (@Read oid x vr), w'.
-        assert (Hneq_tt': t <> t') by (intro Heq; subst t'; destruct (wr_reads_writes H x t t Hwr') as [_ [_ []]]; auto).
-        repeat (split; [assumption || (unfold WTx; split; [assumption | eauto]) |]).
-        unfold wr_rel. destruct Hwx_t' as [_ [Hw'_write Hw'_key]].
-        repeat split; simpl; auto.
+        assert (Hpo_src_r: po t w_src r).
+        { destruct (Htot w_src r Hw_src_ops Hr_ops Hneq_src_r) as [Hpo | Hpo]; auto.
+          exfalso. apply Hno_c.
+          unfold TAP_c. exists t, w_src, r.
+          split; [exact Ht |].
+          split; [unfold W; split; assumption |].
+          split; [unfold R; split; assumption |].
+          split; [exact Hwr_src | exact Hpo]. }
+        exists w_src.
+        split. { repeat split; assumption. }
+        split. { exact Hpo_src_r. }
+        split. { exact Hwr_src. }
+        intros w'' Hwx''.
+        destruct (Op_eq_dec w'' w_src) as [Heq | Hneq_w''].
+        { subst w''. tauto. }
+        destruct Hwx'' as [Hw''_ops [Hw''_is_w Hw''_key]].
+        destruct (Htot w'' w_src Hw''_ops Hw_src_ops Hneq_w'')
+          as [Hpo_w''_src | Hpo_src_w''].
+        { left. exact Hpo_w''_src. }
+        assert (Hneq_w''_r: w'' <> r).
+        { intro Heq. subst w''. destruct r; contradiction. }
+        destruct (Htot w'' r Hw''_ops Hr_ops Hneq_w''_r)
+          as [Hpo_w''_r | Hpo_r_w''].
+        + exfalso. apply Hno_e.
+          unfold TAP_e. exists x, t, w_src, w'', r.
+          split; [exact Ht |].
+          split; [split; [exact Hw_src_ops | split; [exact Hw_src_is_w | exact Hw_src_key]] |].
+          split; [split; [exact Hw''_ops | split; [exact Hw''_is_w | exact Hw''_key]] |].
+          split; [intro Heq; apply Hneq_w''; symmetry; exact Heq |].
+          split; [split; [exact Hr_ops | split; [exact Hr_is_r | exact Hr_key]] |].
+          split; [exact Hpo_src_w'' |].
+          split; [exact Hpo_w''_r | exact Hwr_src].
+        + right. right. exact Hpo_r_w''.
+      - (* External source, while t has a previous write to x: TAP_d *)
+        exfalso. apply Hno_d.
+        unfold TAP_d. exists x, t, ts, w_pre, r, w_src.
+        exact (conj Ht
+          (conj Hts
+            (conj (fun Heq => Hneq_ts (eq_sym Heq))
+              (conj (conj Ht (ex_intro _ w_pre Hwx_pre))
+                (conj (conj Hts (ex_intro _ w_src Hwx_src))
+                  (conj Hrx
+                    (conj Hwx_pre
+                      (conj Hwx_src
+                        (conj Hwr_src Hpo_pre))))))))).
     }
     (* RC3 completeness: ~TAP_f -> RC3 *)
     (* Paper: "Third, if RC-(3) is violated, then TAP-f would happen" *)
@@ -1102,13 +1063,11 @@ Proof.
       left. split; [exact Hwr13 |]. split; [exact Hcm12 |]. exact Hso23.
     + (* WR y t2 t3 case *)
       right.
-      pose proof (wr_reads_writes H y t2 t3 Hwr23) as [_ [Ht3 [_ [vy [Hwrites_t2 Hreads_t3]]]]].
+      pose proof (proj1 (wr_iff_WR H y t2 t3) Hwr23)
+        as [_ [Ht3 [_ [w [r [_ [Hrx _]]]]]]].
       exists y.
       split.
-      { unfold RTx. split; [exact Ht3 |].
-        unfold txn_reads in Hreads_t3.
-        destruct Hreads_t3 as [r [Hrx _]].
-        exists r. exact Hrx. }
+      { unfold RTx. split; [exact Ht3 | exists r; exact Hrx]. }
       split; [exact Hwr13 |].
       split; [exact Hcm12 |].
       exact Hwr23.
