@@ -146,11 +146,11 @@ Notation "t '⊢' 'W(' x ',' v ')'" := (txn_writes t x v) (at level 80).
 Notation "t '⊢' 'R(' x ',' v ')'" := (txn_reads t x v) (at level 80).
 
 (** General operation write-read relation *)
-Definition wr_rel : relation Op :=
+Definition wr : relation Op :=
   fun w r => is_write w /\ is_read r /\
     op_key w = op_key r /\ op_value w = op_value r.
 
-Notation "w '−wr→' r" := (wr_rel _ w r) (at level 70).
+Notation "w '−wr→' r" := (wr _ w r) (at level 70).
 
 (** * Definition 2: History *)
 
@@ -185,7 +185,7 @@ Record History := {
   (** WR constraints *)
   wr_unique : forall t x r,
     T t -> Rx t x r ->
-    exists! w, exists ts, T ts /\ Wx ts x w /\ wr_rel w r;
+    exists! w, exists ts, T ts /\ Wx ts x w /\ wr w r;
 
   (** (SO U WR) is acyclic**)
   so_wr_acyclic : strict_order (clos_trans Transaction (fun t1 t2 => SO t1 t2 \/ exists x, WR x t1 t2));
@@ -204,7 +204,7 @@ Record History := {
     WR x t s <->
       T t /\ T s /\ t <> s /\
       exists w r,
-        Wx t x w /\ Rx s x r /\ wr_rel w r
+        Wx t x w /\ Rx s x r /\ wr w r
 }.
 
 (** Consequences of the History well-formedness assumptions. *)
@@ -212,7 +212,7 @@ Record History := {
 Lemma read_has_committed_source : forall H t x r,
   T H t ->
   Rx t x r ->
-  exists ts w, T H ts /\ Wx ts x w /\ wr_rel w r.
+  exists ts w, T H ts /\ Wx ts x w /\ wr w r.
 Proof.
   intros H t x r Ht Hrx.
   destruct (wr_unique H t x r Ht Hrx) as [w [[ts [Hts [Hwx Hwr]]] _]].
@@ -225,7 +225,7 @@ Lemma wr_implies_WR : forall H t s w r,
   t <> s ->
   ops t w ->
   ops s r ->
-  wr_rel w r ->
+  wr w r ->
   WR H (op_key w) t s.
 Proof.
   intros H t s w r Ht Hs Hneq Hw_ops Hr_ops Hwr.
@@ -278,7 +278,7 @@ Definition CutIsolation (H : History) : Prop :=
     Wx t1 x w1 ->
     Wx t2 x w2 ->
     t1 <> t2 -> r1 <> r2 ->
-    wr_rel w1 r1 -> wr_rel w2 r2 ->
+    wr w1 r1 -> wr w2 r2 ->
     v = v'.
 
 (** * Definition 4: Read Committed *)
@@ -288,7 +288,7 @@ Definition RC1 (H : History) : Prop :=
   forall t r w,
     T H t ->
     R t r -> W t w ->
-    wr_rel w r -> po t w r.
+    wr w r -> po t w r.
 
 (** RC-2: If a read on x is preceded by writes to x, it reads the last such write *)
 Definition RC2 (H : History) : Prop :=
@@ -297,7 +297,7 @@ Definition RC2 (H : History) : Prop :=
     Rx t x r ->
     (exists w', Wx t x w' /\ po t w' r) ->
     exists w, Wx t x w /\ po t w r /\
-      wr_rel w r /\
+      wr w r /\
       forall w'', Wx t x w'' -> po t w'' w \/ w'' = w \/ po t r w''.
 
 (** RC-3: If a transaction writes to a key multiple times, only the last write
@@ -312,7 +312,7 @@ Definition RC3 (H : History) : Prop :=
        t' <> t /\ 
        T H t' /\ 
        Rx t' x r /\ 
-       wr_rel w r) ->
+       wr w r) ->
     po t w' w \/ w' = w.
 
 (** RC-4: MonoAtomicView axiom 
@@ -326,7 +326,7 @@ Definition MonoAtomicView (H : History) (CM : relation Transaction) : Prop :=
     t3 <> t1 -> t3 <> t2 ->
     (exists wx wy rx ry, Wx t1 x wx /\ Wx t2 y wy /\
     Rx t3 x rx /\ Rx t3 y ry /\
-    po t3 ry rx /\ wr_rel wy ry /\ wr_rel wx rx) ->                                   
+    po t3 ry rx /\ wr wy ry /\ wr wx rx) ->                                   
     CM t2 t1.
 
 (** Read Committed *)
@@ -370,28 +370,28 @@ Definition TransactionalCausalConsistency (H : History) : Prop :=
 Definition TAP_a (H : History) : Prop :=
   exists r t, T H t /\ R t r /\
     forall w t', (T H t' \/ Taborted t') /\ W t' w ->
-      ~wr_rel w r.
+      ~wr w r.
 
 (** TAP-b: AbortedRead - A transaction reads from an aborted transaction *)
 Definition TAP_b (H : History) : Prop :=
   exists r w t ta, 
     T H t /\  R t r /\ 
     Taborted ta /\ W ta w /\ 
-    wr_rel w r.
+    wr w r.
 
 (** TAP-c: FutureRead - A transaction reads from a future write in itself *)
 Definition TAP_c (H : History) : Prop :=
   exists t w r,
     T H t /\
     W t w /\ R t r /\
-    wr_rel w r /\ po t r w.
+    wr w r /\ po t r w.
 
 (** TAP-d: NotMyOwnWrite - Transaction reads from external write but has written to x *)
 Definition TAP_d (H : History) : Prop :=
   exists x t t' w r w',
     T H t /\ T H t' /\ t <> t' /\ WTx (T H) x t /\ WTx (T H) x t' /\
     Rx t x r /\ Wx t x w /\  Wx t' x w' /\
-    wr_rel w' r /\ po t w r.
+    wr w' r /\ po t w r.
 
 (** TAP-e: NotMyLastWrite - Transaction reads from internal write that's not the last *)
 Definition TAP_e (H : History) : Prop :=
@@ -400,14 +400,14 @@ Definition TAP_e (H : History) : Prop :=
     Wx t x w /\ Wx t x w' /\ w <> w' /\
     Rx t x r /\
     po t w w' /\ po t w' r /\
-    wr_rel w r.
+    wr w r.
 
 (** TAP-f: IntermediateRead - Transaction reads intermediate value from another transaction *)
 Definition TAP_f (H : History) : Prop :=
   exists x t t' r w w',
     T H t /\ T H t' /\ t <> t' /\ RTx (T H) x t /\ WTx (T H) x t' /\
     Rx t x r /\ Wx t' x w /\ Wx t' x w' /\ w <> w' /\
-    wr_rel w r /\ po t' w w'.
+    wr w r /\ po t' w w'.
 
 (** TAP-g: CyclicCO - The relation SO ∪ WR is cyclic *)
 Definition TAP_g (H : History) : Prop :=
@@ -422,8 +422,8 @@ Definition TAP_h (H : History) : Prop :=
     t3 <> t1 /\ t3 <> t2 /\
     Wx t1 x wx /\ Wx t2 y wy /\
     Rx t3 x rx /\ Rx t3 y ry /\
-    wr_rel wx rx /\
-    wr_rel wy ry /\
+    wr wx rx /\
+    wr wy ry /\
     po t3 ry rx /\
     CO H t1 t2.
 
@@ -436,8 +436,8 @@ Definition TAP_i (H : History) (CM : relation Transaction) : Prop :=
     t3 <> t1 /\ t3 <> t2 /\
     Wx t1 x wx /\ Wx t2 y wy /\
     Rx t3 x rx /\ Rx t3 y ry /\
-    wr_rel wx rx /\
-    wr_rel wy ry /\
+    wr wx rx /\
+    wr wy ry /\
     po t3 ry rx /\
     CM t1 t2.
 
@@ -450,7 +450,7 @@ Definition TAP_j (H : History) : Prop :=
     Rx t x r1 /\ op_value r1 = v /\
     Rx t x r2 /\ op_value r2 = v' /\
     Wx t1 x w1 /\ Wx t2 x w2 /\
-    t1 <> t2 /\ wr_rel w1 r1 /\ wr_rel w2 r2.
+    t1 <> t2 /\ wr w1 r1 /\ wr w2 r2.
 
 (** TAP-k: FracturedReadCO - Fractured read with CO order *)
 Definition TAP_k (H : History) : Prop :=
@@ -616,7 +616,7 @@ Proof.
       subst ta. apply (disjoint_T_Taborted H ts); assumption.
     + (* TAP_c *) unfold TAP_c. intros [t [w [r [Ht [Hw [Hr [Hwr Hpo]]]]]]].
       unfold RC1 in HRC1.
-      (* By RC1, if wr_rel w r, then po t w r *)
+      (* By RC1, if wr w r, then po t w r *)
       specialize (HRC1 t r w Ht Hr Hw Hwr).
       (* Now we have po t w r from RC1, but Hpo says po t r w. *)
       destruct (po_strict_total t) as [Hstrict _].
@@ -635,8 +635,8 @@ Proof.
       (* By RC2, t must read from some internal write *)
       destruct (HRC2 x t r Ht Hrx Hpreceded) as [w_int [Hwx_int [Hpo_int [Hwr_int _]]]].
       (* w_int is the last write to x before r in t *)
-      (* Hwr_int: wr_rel w_int r -- r reads from w_int (internal) *)
-      (* But Hwr: wr_rel w' r -- r reads from w' (in external t') *)
+      (* Hwr_int: wr w_int r -- r reads from w_int (internal) *)
+      (* But Hwr: wr w' r -- r reads from w' (in external t') *)
       (* w_int and w' must write the same value to x *)
       destruct Hwr_int as [_ [_ [Hkey_int Hval_int]]].
       destruct Hwr as [_ [_ [Hkey_ext Hval_ext]]].
@@ -656,16 +656,16 @@ Proof.
       contradiction.
     + (* TAP_e: NotMyLastWrite - forbidden by RC2 *)
       unfold TAP_e. intros [x [t [w [w' [r [Ht [Hwx [Hwx' [Hneq [Hrx [Hpo_ww' [Hpo_w'r Hwr]]]]]]]]]]]].
-      (* TAP_e: t has two writes w and w' to x, with po t w w' /\ po t w' r /\ wr_rel w r
+      (* TAP_e: t has two writes w and w' to x, with po t w w' /\ po t w' r /\ wr w r
          i.e., r reads from w but w is NOT the last write before r (w' comes after w) *)
       unfold RC2 in HRC2.
       (* By RC2: since w' precedes r, r must read from the last write before r *)
       assert (Hpreceded: exists w'', Wx t x w'' /\ po t w'' r).
       { exists w'. split; assumption. }
       destruct (HRC2 x t r Ht Hrx Hpreceded) as [w_last [Hwx_last [Hpo_last [Hwr_last Hmax]]]].
-      (* Hwr_last: wr_rel w_last r - r reads from w_last according to RC2 *)
-      (* Hwr: wr_rel w r - r reads from w according to TAP_e *)
-      (* Both have wr_rel with r, so w and w_last write the same value *)
+      (* Hwr_last: wr w_last r - r reads from w_last according to RC2 *)
+      (* Hwr: wr w r - r reads from w according to TAP_e *)
+      (* Both have wr with r, so w and w_last write the same value *)
       specialize (Hmax w' Hwx').
       destruct Hmax as [Hpo_w'_wlast | [Heq_w'_wlast | Hpo_r_w']].
       * (* Case 1: po t w' w_last *)
@@ -697,10 +697,10 @@ Proof.
       unfold TAP_f. 
       intros [x [t [t' [r [w [w' [Ht [Ht' [Hneq [HRTx_t [HWTx_t' [Hrx [Hwx [Hwx' [Hneqw [Hwr Hpo]]]]]]]]]]]]]]]].
       (* TAP_f structure: T H t /\ T H t' /\ t <> t' /\ RTx (T H) x t /\ WTx (T H) x t' /\
-         Rx t x r /\ Wx t' x w /\ Wx t' x w' /\ w <> w' /\ wr_rel w r /\ po t' w w' *)
+         Rx t x r /\ Wx t' x w /\ Wx t' x w' /\ w <> w' /\ wr w r /\ po t' w w' *)
       unfold RC3 in HRC3.
       (* RC3: forall x t w w', T H t -> Wx t x w -> Wx t x w' -> 
-         (exists t' r, t' <> t /\ T H t' /\ Rx t' x r /\ wr_rel w r) -> po t w' w \/ w' = w
+         (exists t' r, t' <> t /\ T H t' /\ Rx t' x r /\ wr w r) -> po t w' w \/ w' = w
          
          Apply RC3 with:
          - the writing transaction = t' (our external writer)
@@ -740,7 +740,7 @@ Proof.
     
     (* RC1 completeness: ~TAP_c -> RC1 *)
     (* Paper: "First, if RC-(1) is violated, then TAP-c would happen" *)
-    (* RC1 states: if wr_rel w r (r reads from w), then po t w r (w precedes r) *)
+    (* RC1 states: if wr w r (r reads from w), then po t w r (w precedes r) *)
     (* Contrapositive: if po t r w (r precedes w), then TAP_c (FutureRead) occurs *)
     split. { unfold RC1. intros t r w Ht Hr Hw Hintra.
       (* Get properties of program order: irreflexive, transitive, and total *)
@@ -869,7 +869,7 @@ Proof.
           split. { unfold Wx. repeat split; assumption. }  (* Wx t x w *)
           split. { unfold Wx. repeat split; assumption. }  (* Wx t x w' *)
           split. { exact Hneq_ww'. }      (* w <> w' *)
-          split. { exact Hwr. }           (* wr_rel w r - r reads from w *)
+          split. { exact Hwr. }           (* wr w r - r reads from w *)
           { exact Hpo_ww'. }              (* po t w w' - w' comes after w *)
         + (* Case: po t w' w - w' is before w, goal satisfied *)
           left. exact Hpo_w'w.
