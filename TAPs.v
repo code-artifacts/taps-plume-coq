@@ -6,7 +6,7 @@
     
     We formalize:
     - Definitions 1-6 (Transactions, Histories, and Isolation Levels)
-    - All 14 TAPs from Section 3.2 and Table 1
+    - TAP definitions from Section 3.2 and Table 1
     - Theorems 2-5 (Soundness and Completeness)
 *)
 
@@ -458,8 +458,7 @@ Definition TAP_k (H : History) : Prop :=
     WTx (T H) x t1 /\ WTx (T H) x t2 /\ t1 <> t2 /\
     RTx (T H) x t3 /\
     t3 <> t1 /\ t3 <> t2 /\
-    ((WR H x t1 t3 /\ CO H t1 t2 /\ SO H t2 t3) \/
-      (exists y, RTx (T H) y t3 /\ WR H x t1 t3 /\ CO H t1 t2 /\ WR H y t2 t3)).
+    (exists y, RTx (T H) y t3 /\ WR H x t1 t3 /\ CO H t1 t2 /\ WR H y t2 t3).
 
 (** TAP-l: FracturedReadCM - Fractured read with CM order *)
 Definition TAP_l (H : History) (CM : relation Transaction) : Prop :=
@@ -467,8 +466,7 @@ Definition TAP_l (H : History) (CM : relation Transaction) : Prop :=
     WTx (T H) x t1 /\ WTx (T H) x t2 /\ t1 <> t2 /\
     RTx (T H) x t3 /\
     t3 <> t1 /\ t3 <> t2 /\
-    ((WR H x t1 t3 /\ CM t1 t2 /\ SO H t2 t3) \/
-      (exists y, RTx (T H) y t3 /\ WR H x t1 t3 /\ CM t1 t2 /\ WR H y t2 t3)).
+    (exists y, RTx (T H) y t3 /\ WR H x t1 t3 /\ CM t1 t2 /\ WR H y t2 t3).
 
 (** TAP-m: COConflictCM - CO and CM order conflict *)
 Definition TAP_m (H : History) (CM : relation Transaction) : Prop :=
@@ -488,6 +486,22 @@ Definition TAP_n (H : History) (CM : relation Transaction) : Prop :=
     WR H x t1 t3 /\
     CM t1 t2 /\ CO H t2 t3.
 
+(** TAP-o: New TAP *)
+Definition TAP_o (H : History) : Prop :=
+  exists x t1 t2 t3,
+    WTx (T H) x t1 /\ WTx (T H) x t2 /\ t1 <> t2 /\
+    RTx (T H) x t3 /\
+    t3 <> t1 /\ t3 <> t2 /\
+    (WR H x t1 t3 /\ CO H t1 t2 /\ SO H t2 t3).
+
+(** TAP-p: New TAP *)
+Definition TAP_p (H : History) (CM : relation Transaction) : Prop :=
+  exists x t1 t2 t3,
+    WTx (T H) x t1 /\ WTx (T H) x t2 /\ t1 <> t2 /\
+    RTx (T H) x t3 /\
+    t3 <> t1 /\ t3 <> t2 /\
+    (WR H x t1 t3 /\ CM t1 t2 /\ SO H t2 t3).
+
 (** * Characterization of isolation levels via TAPs *)
 
 (** History is free of TAPs a through g *)
@@ -499,9 +513,10 @@ Definition no_TAP_a_to_g (H : History) : Prop :=
 Definition no_TAP_a_to_i (H : History) (CM : relation Transaction) : Prop :=
   no_TAP_a_to_g H /\ ~TAP_h H /\ ~TAP_i H CM.
 
-(** History is free of TAPs a through l with a commit order *)
+(** History is free of TAPs needed for RA with a commit order *)
 Definition no_TAP_a_to_l (H : History) (CM : relation Transaction) : Prop :=
-  no_TAP_a_to_i H CM /\ ~TAP_j H /\ ~TAP_k H /\ ~TAP_l H CM.
+  no_TAP_a_to_i H CM /\ ~TAP_j H /\ ~TAP_k H /\ ~TAP_l H CM /\
+  ~TAP_o H /\ ~TAP_p H CM.
 
 (** History is free of all TAPs *)
 Definition no_all_TAPs (H : History) (CM : relation Transaction) : Prop :=
@@ -953,12 +968,37 @@ Lemma TAP_k_implies_TAP_l : forall H CM,
   commit_order H CM -> TAP_k H -> TAP_l H CM.
 Proof.
   intros H CM [_ [_ Hco_cm]] [x [t1 [t2 [t3 H_tap]]]].
+  destruct H_tap as [Hwt1 [Hwt2 [Hneq12 [Hrt3 [Hneq31 [Hneq32 [y [Hrty3 [Hwr13 [Hco12 Hwr23]]]]]]]]]].
   exists x, t1, t2, t3.
-  destruct H_tap as [? [? [? [? [? [? [[? [HCO ?]] | [y [? [? [HCO ?]]]]]]]]]]].
-  - repeat (split; [assumption |]). left.
-    repeat (split; [assumption |]). split; [apply Hco_cm; exact HCO |]. assumption.
-  - repeat (split; [assumption |]). right. exists y.
-    repeat (split; [assumption |]). split; [apply Hco_cm; exact HCO |]. assumption.
+  split; [exact Hwt1 |].
+  split; [exact Hwt2 |].
+  split; [exact Hneq12 |].
+  split; [exact Hrt3 |].
+  split; [exact Hneq31 |].
+  split; [exact Hneq32 |].
+  exists y.
+  split; [exact Hrty3 |].
+  split; [exact Hwr13 |].
+  split; [apply Hco_cm; exact Hco12 |].
+  exact Hwr23.
+Qed.
+
+(** TAP_o implies TAP_p when commit_order holds (since CO ⊆ CM) *)
+Lemma TAP_o_implies_TAP_p : forall H CM,
+  commit_order H CM -> TAP_o H -> TAP_p H CM.
+Proof.
+  intros H CM [_ [_ Hco_cm]] [x [t1 [t2 [t3 H_tap]]]].
+  destruct H_tap as [Hwt1 [Hwt2 [Hneq12 [Hrt3 [Hneq31 [Hneq32 [Hwr13 [Hco12 Hso23]]]]]]]].
+  exists x, t1, t2, t3.
+  split; [exact Hwt1 |].
+  split; [exact Hwt2 |].
+  split; [exact Hneq12 |].
+  split; [exact Hrt3 |].
+  split; [exact Hneq31 |].
+  split; [exact Hneq32 |].
+  split; [exact Hwr13 |].
+  split; [apply Hco_cm; exact Hco12 |].
+  exact Hso23.
 Qed.
 
 (** ReadAtomic implies CutIsolation *)
@@ -1018,33 +1058,39 @@ Proof.
   right. exists y. exact HWR2.
 Qed.
 
-(** ReadAtomic <-> ~TAP_l *)
-Lemma ReadAtomic_iff_no_TAP_l : forall H CM,
-  commit_order H CM -> (ReadAtomic H CM <-> ~TAP_l H CM).
+(** ReadAtomic <-> ~TAP_l /\ ~TAP_p *)
+Lemma ReadAtomic_iff_no_TAP_l_p : forall H CM,
+  commit_order H CM -> (ReadAtomic H CM <-> ~TAP_l H CM /\ ~TAP_p H CM).
 Proof.
   intros H CM HCM. split.
-  - (* Soundness: ReadAtomic -> ~TAP_l *)
+  - (* Soundness: ReadAtomic -> ~TAP_l /\ ~TAP_p *)
     intros HRa.
     unfold ReadAtomic in HRa.
-    unfold TAP_l. intros [x [t1 [t2 [t3 [Hwxt1 [Hwxt2 [Hneq12 [Hrxt3 [Hneq31 [Hneq32 [Hwr | Hso]]]]]]]]]]].
-    + destruct Hwr as [Hwr13 [Hcm12 Hso23]].
+    split.
+    + unfold TAP_l.
+      intros [x [t1 [t2 [t3 Htap_l]]]].
+      destruct Htap_l as [Hwxt1 [Hwxt2 [Hneq12 [Hrxt3 [Hneq31 [Hneq32 Htap_l]]]]]].
+      destruct Htap_l as [y [Hryt3 [Hwr13 [Hcm12 Hwr23]]]].
       assert (Hcm21: CM t2 t1).
       { apply (HRa x t1 t2 t3 Hwxt1 Hwxt2 Hneq12 Hrxt3 Hneq31 Hneq32 Hwr13).
-        unfold SO_union_WR. left. tauto. }
+        unfold SO_union_WR. right. exists y. exact Hwr23. }
       destruct HCM as [Hstrict _].
       unfold strict_order in Hstrict. destruct Hstrict as [Hirrefl Htrans].
       assert (Hcycle: CM t1 t1). { eapply Htrans; [exact Hcm12 | exact Hcm21]. }
       apply Hirrefl in Hcycle. assumption.
-    + destruct Hso as [y [Hryt3 [Hwr13 [Hcm12 Hwr23]]]].
+    + unfold TAP_p.
+      intros [x [t1 [t2 [t3 Htap_p]]]].
+      destruct Htap_p as [Hwxt1 [Hwxt2 [Hneq12 [Hrxt3 [Hneq31 [Hneq32 Htap_p]]]]]].
+      destruct Htap_p as [Hwr13 [Hcm12 Hso23]].
       assert (Hcm21: CM t2 t1).
       { apply (HRa x t1 t2 t3 Hwxt1 Hwxt2 Hneq12 Hrxt3 Hneq31 Hneq32 Hwr13).
-        unfold SO_union_WR. right. exists y. tauto. }
+        unfold SO_union_WR. left. exact Hso23. }
       destruct HCM as [Hstrict _].
       unfold strict_order in Hstrict. destruct Hstrict as [Hirrefl Htrans].
       assert (Hcycle: CM t1 t1). { eapply Htrans; [exact Hcm12 | exact Hcm21]. }
       apply Hirrefl in Hcycle. assumption.
-  - (* Completeness: ~TAP_l -> ReadAtomic *)
-    intros Hno_l.
+  - (* Completeness: ~TAP_l /\ ~TAP_p -> ReadAtomic *)
+    intros [Hno_l Hno_p].
     unfold ReadAtomic.
     intros x t1 t2 t3 Hwt1 Hwt2 Hneq12 Hrt3 Hneq31 Hneq32 Hwr13 Hso_wr.
     (* Use totality of CM: either CM t1 t2 or CM t2 t1 *)
@@ -1052,17 +1098,28 @@ Proof.
     assert (Ht1: T H t1). { destruct Hwt1; assumption. }
     assert (Ht2: T H t2). { destruct Hwt2; assumption. }
     destruct (Htot t1 t2 Ht1 Ht2 Hneq12) as [Hcm12 | Hcm21]; auto.
-    (* Case: CM t1 t2 - derive contradiction via TAP_l *)
-    exfalso. apply Hno_l.
-    unfold TAP_l.
-    exists x, t1, t2, t3.
-    repeat (split; [assumption |]).
+    (* Case: CM t1 t2 - derive contradiction via TAP_p or TAP_l *)
+    exfalso.
     unfold SO_union_WR in Hso_wr.
     destruct Hso_wr as [Hso23 | [y Hwr23]].
     + (* SO t2 t3 case *)
-      left. split; [exact Hwr13 |]. split; [exact Hcm12 |]. exact Hso23.
+      apply Hno_p.
+      unfold TAP_p.
+      exists x, t1, t2, t3.
+      split; [exact Hwt1 |].
+      split; [exact Hwt2 |].
+      split; [exact Hneq12 |].
+      split; [exact Hrt3 |].
+      split; [exact Hneq31 |].
+      split; [exact Hneq32 |].
+      split; [exact Hwr13 |].
+      split; [exact Hcm12 |].
+      exact Hso23.
     + (* WR y t2 t3 case *)
-      right.
+      apply Hno_l.
+      unfold TAP_l.
+      exists x, t1, t2, t3.
+      repeat (split; [assumption |]).
       pose proof (proj1 (wr_iff_WR H y t2 t3) Hwr23)
         as [_ [Ht3 [_ [w [r [_ [Hrx _]]]]]]].
       exists y.
@@ -1105,16 +1162,26 @@ Proof.
     + (* TAP_j: use CI_soundness_completeness *)
       apply CI_soundness_completeness. exact HCI.
     + (* TAP_k: reduce to TAP_l via TAP_k_implies_TAP_l *)
+      pose proof (proj1 (ReadAtomic_iff_no_TAP_l_p H CM (conj Hstrict HCM_rest)) HReadAtomic)
+        as [Hno_l Hno_p].
       intros Htap_k.
       apply (TAP_k_implies_TAP_l H CM (conj Hstrict HCM_rest)) in Htap_k.
-      exact (proj1 (ReadAtomic_iff_no_TAP_l H CM (conj Hstrict HCM_rest)) HReadAtomic Htap_k).
-    + (* TAP_l: use ReadAtomic_iff_no_TAP_l directly *)
-      exact (proj1 (ReadAtomic_iff_no_TAP_l H CM (conj Hstrict HCM_rest)) HReadAtomic).
+      exact (Hno_l Htap_k).
+    + (* TAP_l: use ReadAtomic_iff_no_TAP_l_p directly *)
+      exact (proj1 (proj1 (ReadAtomic_iff_no_TAP_l_p H CM (conj Hstrict HCM_rest)) HReadAtomic)).
+    + (* TAP_o: reduce to TAP_p via TAP_o_implies_TAP_p *)
+      pose proof (proj1 (ReadAtomic_iff_no_TAP_l_p H CM (conj Hstrict HCM_rest)) HReadAtomic)
+        as [Hno_l Hno_p].
+      intros Htap_o.
+      apply (TAP_o_implies_TAP_p H CM (conj Hstrict HCM_rest)) in Htap_o.
+      exact (Hno_p Htap_o).
+    + (* TAP_p: use ReadAtomic_iff_no_TAP_l_p directly *)
+      exact (proj2 (proj1 (ReadAtomic_iff_no_TAP_l_p H CM (conj Hstrict HCM_rest)) HReadAtomic)).
   - (* Completeness: no TAPs a-l -> RA *)
     intros [CM [HCM Hno_taps]].
     unfold ReadAtomicity.
     unfold no_TAP_a_to_l in Hno_taps.
-    destruct Hno_taps as [Hno_ai [Hno_j [Hno_k Hno_l]]].
+    destruct Hno_taps as [Hno_ai [Hno_j [Hno_k [Hno_l [Hno_o Hno_p]]]]].
     unfold no_TAP_a_to_i in Hno_ai.
     destruct Hno_ai as [Hno_ag [Hno_h Hno_i]].
     assert (HRC: RC1 H /\ RC2 H /\ RC3 H).
@@ -1122,8 +1189,9 @@ Proof.
     destruct HRC as [HRC1 [HRC2 HRC3]].
     repeat split; auto.
     exists CM. split. assumption.
-    (* ~TAP_l -> ReadAtomic via ReadAtomic_iff_no_TAP_l *)
-    apply (proj2 (ReadAtomic_iff_no_TAP_l H CM HCM)). exact Hno_l.
+    (* ~TAP_l /\ ~TAP_p -> ReadAtomic via ReadAtomic_iff_no_TAP_l_p *)
+    apply (proj2 (ReadAtomic_iff_no_TAP_l_p H CM HCM)).
+    split; assumption.
 Qed.
 (** * Theorem 5: Soundness and Completeness for TCC *)
 
@@ -1216,12 +1284,22 @@ Proof.
     + (* TAP_j: use CI_soundness_completeness *)
       apply CI_soundness_completeness.
       apply (ReadAtomic_implies_CutIsolation H CM Hstrict HReadAtomic).
-    + (* TAP_k: use ReadAtomic_iff_no_TAP_l via TAP_k_implies_TAP_l *)
+    + (* TAP_k: use ReadAtomic_iff_no_TAP_l_p via TAP_k_implies_TAP_l *)
+      pose proof (proj1 (ReadAtomic_iff_no_TAP_l_p H CM (conj Hstrict HCM_rest)) HReadAtomic)
+        as [Hno_l Hno_p].
       intros Htap_k.
       apply (TAP_k_implies_TAP_l H CM (conj Hstrict HCM_rest)) in Htap_k.
-      exact (proj1 (ReadAtomic_iff_no_TAP_l H CM (conj Hstrict HCM_rest)) HReadAtomic Htap_k).
-    + (* TAP_l: use ReadAtomic_iff_no_TAP_l directly *)
-      exact (proj1 (ReadAtomic_iff_no_TAP_l H CM (conj Hstrict HCM_rest)) HReadAtomic).
+      exact (Hno_l Htap_k).
+    + (* TAP_l: use ReadAtomic_iff_no_TAP_l_p directly *)
+      exact (proj1 (proj1 (ReadAtomic_iff_no_TAP_l_p H CM (conj Hstrict HCM_rest)) HReadAtomic)).
+    + (* TAP_o: reduce to TAP_p via TAP_o_implies_TAP_p *)
+      pose proof (proj1 (ReadAtomic_iff_no_TAP_l_p H CM (conj Hstrict HCM_rest)) HReadAtomic)
+        as [Hno_l Hno_p].
+      intros Htap_o.
+      apply (TAP_o_implies_TAP_p H CM (conj Hstrict HCM_rest)) in Htap_o.
+      exact (Hno_p Htap_o).
+    + (* TAP_p: use ReadAtomic_iff_no_TAP_l_p directly *)
+      exact (proj2 (proj1 (ReadAtomic_iff_no_TAP_l_p H CM (conj Hstrict HCM_rest)) HReadAtomic)).
     + (* TAP_m: reduce to TAP_n via TAP_m_implies_TAP_n *)
       intros Htap_m.
       apply (TAP_m_implies_TAP_n H CM (conj Hstrict HCM_rest)) in Htap_m.
@@ -1234,7 +1312,7 @@ Proof.
     unfold no_all_TAPs in Hno_taps.
     destruct Hno_taps as [Hno_al [Hno_m Hno_n]].
     unfold no_TAP_a_to_l in Hno_al.
-    destruct Hno_al as [Hno_ai [Hno_j [Hno_k Hno_l]]].
+    destruct Hno_al as [Hno_ai [Hno_j [Hno_k [Hno_l [Hno_o Hno_p]]]]].
     unfold no_TAP_a_to_i in Hno_ai.
     destruct Hno_ai as [Hno_ag [Hno_h Hno_i]].
     assert (HRC: RC1 H /\ RC2 H /\ RC3 H).
